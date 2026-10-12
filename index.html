@@ -126,6 +126,30 @@
     background: var(--body);
   }
 
+  /* SHARING — the page's link, on a slip above the keys */
+  .share {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5em .75em;
+    margin-bottom: 1em;
+    padding-bottom: 1em;
+    border-bottom: 1px solid hsl(30, 5%, 24%);
+    color: hsl(38, 6%, 80%);
+
+    a {
+      margin-right: .25em;
+      color: inherit;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .9rem;
+      overflow-wrap: anywhere;
+      text-decoration-color: hsl(38, 4%, 55%);
+      text-underline-offset: 3px;
+    }
+
+    .status { margin-left: auto; font-size: .85rem; opacity: .7; }
+  }
+
   /* MARGIN & TAB STOPS — light tabs, rounded on the outside, pointing at exactly where each margin falls */
 
   /* They stay out of sight until you come near the edge of the sheet: the strip above it, or the margin to its left */
@@ -540,6 +564,12 @@
     <textarea class="input" autofocus spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
   </div>
   <div class="ui">
+    <div class="share" hidden>
+      <a target="_blank" rel="noopener"></a>
+      <button class="copy">Copy link</button>
+      <button class="stop">Stop sharing</button>
+      <span class="status"></span>
+    </div>
     <div class="buttons">
       <button id="paper" title="Paper">Letter</button>
       <button id="reset">Reset</button>
@@ -548,6 +578,8 @@
       <button id="export" title="Save the text as a Markdown file">Export</button>
       <input type="file" id="importFile" accept=".md,.markdown,.txt,text/markdown,text/x-markdown,text/plain" hidden>
       <button id="print">Print</button>
+      <button id="share" title="Share a link to this page — it always shows the latest version">Share</button>
+      <button id="edit" title="Edit this page — the changes show up at this link" hidden>Edit</button>
     </div>
   </div>
 </section>

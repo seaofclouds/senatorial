@@ -53,12 +53,26 @@ In a table, Return starts a new line inside the cell (or, at the end of the last
 Shift-Tab select the next and previous cells, Tab in the last cell adds a row, and the alignment lever sets the
 column. Columns spread out across the line when they fit, and wrap within a share of it when they don't.
 
+## Sharing
+
+The Share key gives the page a short link (on a phone, it brings up the share sheet). Whoever opens it sees the page
+as it is on your machine — read-only, but always the latest version: every change is sent to the link a moment after
+you make it, and an open link picks it up when they come back to it. They can save, print, or export it.
+
+The link belongs to the page that was on the machine when you shared it. Importing another page or resetting the
+machine stops sending changes to it (Undo picks it back up), and Stop sharing, on the slip the Share key opens, takes
+the link down. The browser you shared from keeps the key to the page, so opening your own link there offers an Edit
+key that brings the page back onto the machine.
+
 ## Running it
 
 There's no build step — `index.coffee` is compiled in the browser by `coffeescript.js`.
-Serve the folder with any static server, e.g. `npx http-server .`
+Serve the folder with any static server, e.g. `npx http-server .` — or, to try sharing too,
+`npx wrangler d1 migrations apply senatorial-shares --local --persist-to ../.senatorial-state` and then
+`npx wrangler dev --persist-to ../.senatorial-state` (keeping the local database outside the folder being served).
 
 ## Deploying
 
-Pushes to `main` deploy to the `senatorial` Cloudflare Worker via Workers Builds,
-using `wrangler.jsonc` to serve this folder as static assets.
+Pushes to `main` deploy to the `senatorial` Cloudflare Worker via Workers Builds, using `wrangler.jsonc` to serve
+this folder as static assets, with `worker.js` handling shared pages (`/s/…`) and their API (`/api/shares/…`).
+Shared pages are kept in the `senatorial-shares` D1 database; its table is in `migrations/`.

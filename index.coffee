@@ -848,6 +848,10 @@ input = $ ".input"
 deckElm = $ ".ui"
 formatMenu = $ ".format"
 
+# A shared page (at /s/<id>) is shown read-only, with its text built into the page
+shared = window.sharedPage
+viewing = shared?
+
 pageViews = []
 renderVersion = 0
 geo = null
@@ -1156,7 +1160,7 @@ applying = false
 
 # Swap a stretch of the Markdown for something else, through the browser so it lands in the undo history
 replaceRaw = (start, end, str)->
-  return if input.value.slice(start, end) is str
+  return if viewing or input.value.slice(start, end) is str
   applying = true
   input.focus preventScroll: true
   input.setSelectionRange start, end
@@ -1460,7 +1464,7 @@ tabToCell = (back)->
 # A little menu that pops up over a selection, for striking it differently
 renderFormatMenu = ()->
   [a, b] = selected()
-  show = a < b and not pointer? and document.activeElement is input
+  show = a < b and not pointer? and document.activeElement is input and not viewing
   formatMenu.hidden = not show
   return unless show
 
@@ -1509,11 +1513,12 @@ load = (name, def)->
   catch
     def
 
+# A shared page being viewed is never saved over the one on your own machine
 saveText = ()->
-  try localStorage.setItem "text", input.value
+  try localStorage.setItem "text", input.value unless viewing
 
 save = (name, val)->
-  try localStorage.setItem name, JSON.stringify val
+  try localStorage.setItem name, JSON.stringify val unless viewing
   val
 
 settings = null
@@ -1524,6 +1529,7 @@ changeSettings = (changes)->
   save "settings", settings
   syncControls()
   invalidate()
+  publishSoon()
 
 # Keep the margins sane, whatever paper we're on
 normalize = ()->
@@ -1576,6 +1582,7 @@ $("#reset").onclick = ()->
   input.value = ""
   reparse()
   saveText()
+  forgetLink()
   settings = structuredClone defaults
   changeSettings {}
   input.focus()
@@ -1677,6 +1684,7 @@ toolsPageAt = (e)->
   if e.clientY - rect.top < top or e.clientX - rect.left < left then page else null
 
 showTools = (page)->
+  page = null if viewing
   return if page is toolsPage
   toolsPage?.classList.remove "tools"
   toolsPage = page
@@ -1891,9 +1899,11 @@ input.addEventListener "keydown", (e)->
       renderSelection()
       followCaret()
 
-input.addEventListener "input", ()->
+input.addEventListener "input", (e)->
   reparse()
   saveText()
+  rebind e.inputType
+  publishSoon()
   render()
   followCaret() unless applying # A rewrite puts the selection back itself, and decides whether to follow it
 
@@ -2009,6 +2019,190 @@ pagesElm.addEventListener "pointercancel", ()->
 
 window.addEventListener "resize", ()-> render()
 
+# SHARING #########################################################################################
+
+# Share hands out a short link to the page: read-only, and always the latest version, since every change is
+# published to it a moment after it's made. The link belongs to the page that was on the machine when it was made —
+# importing another page, or resetting the machine, stops publishing to it (and Undo picks it back up).
+# This browser keeps the key to each page it has shared, so opening one of your own links offers to edit it.
+
+shareKey = $ "#share"
+editKey = $ "#edit"
+shareSlip = $ ".share"
+shareLink = shareSlip.querySelector "a"
+copyKey = shareSlip.querySelector ".copy"
+shareStatus = shareSlip.querySelector ".status"
+
+shares = load "shares", {} # id → key, for each page shared from here
+sharing = load "sharing", null # the link the page on the machine publishes to
+sharing = null unless shares[sharing]?
+published = null # what the link was last sent, so an unchanged page isn't sent again
+publishTimer = null
+publishing = false
+publishAgain = false
+swap = null # the last import, so undoing it can put back the link the page had before
+
+shareUrl = (id)-> "#{location.origin}/s/#{id}"
+randomString = (n, alphabet)-> (alphabet[v % alphabet.length] for v in crypto.getRandomValues new Uint32Array n).join ""
+shareBody = ()-> JSON.stringify markdown: input.value, settings: settings
+pageTitle = ()-> (doc.text.split(/[\n\f]/).find((line)-> line.trim()) ? "Senatorial").replace(/[\u001F ]/g, " ").trim()
+
+attach = (id)->
+  sharing = id
+  published = null
+  save "sharing", sharing
+  syncShareKey()
+
+forgetLink = ()->
+  attach null
+  swap = null
+
+syncShareKey = ()->
+  shareKey.textContent = if sharing? then "Shared" else "Share"
+  shareKey.classList.toggle "active", sharing?
+  shareSlip.hidden = true unless sharing?
+  return unless sharing?
+  shareLink.href = shareUrl sharing
+  shareLink.textContent = shareUrl(sharing).replace /^https?:\/\//, ""
+
+# Undoing an import (or redoing it) puts back the link the page had
+rebind = (inputType)->
+  return unless swap? and inputType in ["historyUndo", "historyRedo"]
+  for [from, to] in [[swap.after, swap.before], [swap.before, swap.after]]
+    if input.value is to.text and sharing is from.sharing
+      attach if shares[to.sharing]? then to.sharing else null
+      changeSettings to.settings if to.settings?
+      return
+
+publishSoon = ()->
+  return unless sharing?
+  clearTimeout publishTimer
+  publishTimer = setTimeout publish, 1500
+
+publish = ()->
+  clearTimeout publishTimer
+  publishTimer = null
+  return unless sharing?
+  return publishAgain = true if publishing
+  body = shareBody()
+  return if body is published
+  id = sharing
+  publishing = true
+  shareStatus.textContent = "Saving…"
+  try
+    res = await fetch "/api/shares/#{id}",
+      method: "PUT"
+      headers: {"content-type": "application/json", authorization: "Bearer #{shares[id]}"}
+      body: body
+      keepalive: body.length < 60000 # so it still goes out if the page is closing
+  catch
+    res = null
+  publishing = false
+  if id is sharing
+    if res?.ok
+      published = body
+      shareStatus.textContent = "Up to date"
+    else if res?.status is 403
+      forgetLink()
+    else
+      shareStatus.textContent = "Not saved yet — trying again"
+      publishTimer = setTimeout publish, 10000
+  if publishAgain
+    publishAgain = false
+    publish()
+
+document.addEventListener "visibilitychange", ()-> publish() if document.hidden and publishTimer?
+
+copyLink = ()->
+  try
+    await navigator.clipboard.writeText shareUrl sharing
+    copyKey.textContent = "Copied"
+    setTimeout (()-> copyKey.textContent = "Copy link"), 2000
+  catch
+    null
+
+# The first press makes the link (and copies it, or brings up the share sheet on a phone). After that, the key
+# shows the link, or puts it away again.
+shareKey.onclick = ()->
+  if sharing? and not shareSlip.hidden
+    shareSlip.hidden = true
+    return
+  unless sharing?
+    id = randomString 10, "abcdefghjkmnpqrstuvwxyz23456789"
+    shares[id] = randomString 32, "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789"
+    save "shares", shares
+    attach id
+    publish()
+  shareSlip.hidden = false
+  if navigator.share? and matchMedia("(pointer: coarse)").matches
+    navigator.share(url: shareUrl(sharing), title: pageTitle()).catch ()-> null
+  else
+    copyLink()
+
+copyKey.onclick = copyLink
+
+shareSlip.querySelector(".stop").onclick = ()->
+  id = sharing
+  return unless id? and confirm "Stop sharing this page? Its link will stop working."
+  try
+    res = await fetch "/api/shares/#{id}", method: "DELETE", headers: {authorization: "Bearer #{shares[id]}"}
+  catch
+    res = null
+  unless res?.ok or res?.status is 404
+    return alert "Couldn't reach the server to stop sharing. Try again in a moment."
+  delete shares[id]
+  save "shares", shares
+  forgetLink() if sharing is id
+  input.focus preventScroll: true
+
+document.addEventListener "keydown", (e)-> shareSlip.hidden = true if e.key is "Escape"
+
+# Opening one of your own links offers to edit it: the page comes back onto the machine, linked again
+editShared = (id)->
+  return unless shares[id]? and sharing isnt id
+  try
+    res = await fetch "/api/shares/#{id}", cache: "no-store"
+  catch
+    res = null
+  if res?.status is 404
+    delete shares[id]
+    save "shares", shares
+    return alert "That page isn't shared any more."
+  return alert "Couldn't open that page. Check your connection and try again." unless res?.ok
+  page = await res.json()
+  loadMarkdown page.markdown, {id, settings: page.settings}
+  published = shareBody()
+
+# Viewing a shared page: it's read-only, and picks up the latest version every so often, and on coming back to it
+sharedText = (page)-> if page.missing then "->This page is no longer shared.<-" else page.markdown
+
+showShared = (page)->
+  settings = Object.assign structuredClone(defaults), page.settings
+  normalize()
+  input.value = sharedText page
+  editKey.hidden = page.missing or not shares[shared.id]?
+  reparse()
+  syncControls()
+  invalidate()
+
+refreshShared = ()->
+  return if document.hidden
+  try
+    res = await fetch "/api/shares/#{shared.id}", cache: "no-store"
+  catch
+    return
+  if res.status is 404
+    page = missing: true
+  else if res.ok
+    page = await res.json()
+  else
+    return
+  return if page.updated is shared.updated and page.missing is shared.missing
+  shared = Object.assign {id: shared.id}, page
+  showShared shared
+
+editKey.onclick = ()-> location.href = "/#edit=#{shared.id}"
+
 # SAVE & PRINT ####################################################################################
 
 renderPageAtExportSize = (p)->
@@ -2056,8 +2250,14 @@ document.addEventListener "drop", (e)->
   e.preventDefault()
   loadMarkdown await file.text()
 
-loadMarkdown = (md)->
+# A shared page being opened for editing brings its link & settings along (and Undo takes them back)
+loadMarkdown = (md, page = {})->
+  return if viewing
+  before = {text: input.value, sharing, settings: (structuredClone settings if page.settings?)}
+  attach page.id ? null
   replaceRaw 0, input.value.length, md.replace /\r\n?/g, "\n"
+  changeSettings page.settings if page.settings?
+  swap = {before, after: {text: input.value, sharing, settings: (structuredClone settings if page.settings?)}}
   setSelection 0, 0, false
   slideCarriage 0
   window.scrollTo 0, 0
@@ -2079,13 +2279,20 @@ $("#print").onclick = ()->
 
 # GO ##############################################################################################
 
-settings = Object.assign structuredClone(defaults), load "settings", {}
+if viewing
+  settings = Object.assign structuredClone(defaults), shared.settings
+  input.value = sharedText shared
+  input.readOnly = true
+  document.body.classList.add "viewing"
+  elm.hidden = true for elm in [paperKey, $("#reset"), $("#import"), shareKey, alignLever, caretElm]
+  editKey.hidden = shared.missing or not shares[shared.id]?
+else
+  settings = Object.assign structuredClone(defaults), load "settings", {}
+  input.value = (try localStorage.getItem "text") ? ""
 normalize()
 
-input.value = (try localStorage.getItem "text") ? ""
-
 # Older versions kept plain text with a separate styles string. Write those out as Markdown, once.
-unless (try localStorage.getItem "format") is "markdown"
+unless viewing or (try localStorage.getItem "format") is "markdown"
   oldStyles = (try localStorage.getItem "styles") ? ""
   version = (try localStorage.getItem "stylesVersion") ? "1"
   text = input.value
@@ -2104,10 +2311,21 @@ unless (try localStorage.getItem "format") is "markdown"
 reparse()
 
 syncControls()
+syncShareKey()
 loadAtlases()
 render()
-input.focus preventScroll: true
-input.setSelectionRange layout.n, layout.n
-renderSelection()
-updateFocus()
-followCaret()
+if viewing
+  input.setSelectionRange 0, 0
+  renderSelection()
+  setInterval refreshShared, 30000
+  document.addEventListener "visibilitychange", refreshShared
+else
+  input.focus preventScroll: true
+  input.setSelectionRange layout.n, layout.n
+  renderSelection()
+  updateFocus()
+  followCaret()
+  publish() # anything that didn't get out before the page was last closed
+  if m = location.hash.match /^#edit=([a-z0-9]+)$/
+    history.replaceState null, "", location.pathname
+    editShared m[1]
