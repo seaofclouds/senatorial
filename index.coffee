@@ -1464,7 +1464,11 @@ renderFormatMenu = ()->
   formatMenu.hidden = not show
   return unless show
 
-  sel = (decodeStyle c for c in doc.styles.slice a, b)
+  # Line breaks, cell breaks, and the spaces at the ends of lines never carry a span (Markdown has nowhere to put it),
+  # so only the printed letters count when showing whether the selection is already struck that way
+  inked = (i for i in [a...b] when /\S/.test(doc.text[i]) and doc.text[i] isnt cellBreak)
+  inked = [a...b] unless inked.length
+  sel = (decodeStyle doc.styles[i] for i in inked)
   for btn in formatMenu.querySelectorAll "[data-weight]"
     btn.classList.toggle "active", sel.every (style)-> style.weight is btn.dataset.weight
   for btn in formatMenu.querySelectorAll "[data-toggle]"
@@ -1483,7 +1487,9 @@ for btn in formatMenu.querySelectorAll "button"
   btn.addEventListener "pointerdown", (e)-> e.preventDefault() # Keep the selection while choosing
   do (btn)-> btn.onclick = ()->
     if btn.dataset.weight?
-      restyleWith weight: btn.dataset.weight
+      # Light & double struck turn back to regular when pressed again
+      on_ = not btn.classList.contains "active"
+      restyleWith weight: if on_ then btn.dataset.weight else "regular"
     else if btn.dataset.caps?
       toggleCaps()
     else
