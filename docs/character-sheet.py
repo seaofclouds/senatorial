@@ -2,7 +2,7 @@
 # Builds docs/character-sheet.pdf: every character Senatorial should have, on one US Letter sheet, in light, regular
 # and double struck. Characters the typewriter already has are cut straight from the scans in glyphs/ at true size;
 # accented letters show their bare letter, to draw the accent over; anything else is left blank, to draw in.
-# Each one is labelled underneath in grey.
+# Each one is labelled underneath in grey, with clear space between, and the baseline is ticked in non-photo blue.
 #
 #   python3 docs/character-sheet.py [path/to/Inconsolata.ttf]
 #
@@ -87,21 +87,26 @@ page = f"""<!doctype html><meta charset="utf-8"><title>Senatorial Character Shee
 @page {{ size: 8.5in 11in; margin: 0 }}
 * {{ box-sizing: border-box }}
 body {{ margin: 0; font-family: Inconsolata, 'DejaVu Sans Mono', monospace; color: #000 }}
-main {{ width: 8.5in; height: 11in; padding: 0.4in 0.55in }}
+main {{ width: 8.5in; height: 11in; padding: 0.35in 0.4in }}
 h1 {{ font-size: 10pt; font-weight: 600; margin: 0 0 0.02in; letter-spacing: 0.04em }}
-p {{ font-size: 7pt; color: #888; margin: 0 0 0.06in }}
-h2 {{ font-size: 8pt; font-weight: 600; margin: 0.08in 0 0.01in; letter-spacing: 0.04em }}
-.grid {{ display: grid; grid-template-columns: repeat(30, 0.2466in) }}
-.cell {{ height: 0.34in; display: flex; flex-direction: column; align-items: center }}
-.glyph {{ position: relative; width: {inch(gw)}; height: 0.2in; border-bottom: 0.5pt dotted #ddd }}
+p {{ font-size: 7pt; color: #888; margin: 0 0 0.04in }}
+h2 {{ font-size: 8pt; font-weight: 600; margin: 0.06in 0 0; letter-spacing: 0.04em }}
+.grid {{ display: grid; grid-template-columns: repeat(32, 0.24in) }}
+.cell {{ height: 0.395in; display: flex; flex-direction: column; align-items: center }}
+/* Room above the capitals for accents; the bottom edge is the baseline */
+.glyph {{ position: relative; width: {inch(gw)}; height: 0.21in; flex: none }}
 .glyph img {{ position: absolute; left: {inch(-pad)}; bottom: {inch(baseline - gh - pad)}; width: {inch(gw + 2 * pad)};
   height: {inch(gh + 2 * pad)}; mix-blend-mode: multiply }}
-.label {{ font-size: 8.5pt; line-height: 0.12in; color: #666; margin-top: 0.02in }}
+/* The baseline is marked by ticks either side, in non-photo blue, leaving the space to draw in clear */
+.glyph::before, .glyph::after {{ content: ""; position: absolute; bottom: 0; width: 0.018in; border-bottom: 0.75pt solid #a4dded }}
+.glyph::before {{ left: -0.058in }} .glyph::after {{ right: -0.058in }}
+/* Clear space under the baseline for descenders, then the label */
+.label {{ font-size: 8.5pt; line-height: 0.11in; color: #666; margin-top: 0.075in }}
 .label.small {{ font-size: 11.5pt }}
 </style>
 <main>
 <h1>SENATORIAL CHARACTER SHEET</h1>
-<p>Glyphs are at true size, cut from the scans. Draw what's missing above its label; accented letters show the bare letter, to draw the accent over.</p>
+<p>True size, cut from the scans. Draw what's missing on the blue baseline ticks; accented letters show the bare letter.</p>
 {"".join(sections)}
 </main>"""
 
