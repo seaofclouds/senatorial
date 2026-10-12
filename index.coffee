@@ -94,7 +94,7 @@ pad = gw * 0.4
 # The atlases are slightly rotated, so this tries to compensate
 skew = 1.3
 
-# Typographer's punctuation that the typewriter doesn't have, mapped to the keys you'd actually strike
+# Typographer's punctuation that the typewriter doesn't have, mapped to the keys you'd actually strike (until the atlas has its own)
 substitutions = "‘": "'", "’": "'", "“": "\"", "”": "\"", "–": "-", "—": "-", "×": "x"
 
 # This function returns the x,y pixel position within the atlas for a given character, or null if the character isn't in the atlas.
@@ -111,8 +111,8 @@ getGlyphPosInAtlas = (c)->
 glyphCache = {}
 glyph = (c)->
   glyphCache[c] ?= do ()->
-    [gx, gy] = getGlyphPosInAtlas substitutions[c] ? c
-    [gx, gy] = getGlyphPosInAtlas "*" unless gx? and gy?
+    [gx, gy] = getGlyphPosInAtlas c
+    [gx, gy] = getGlyphPosInAtlas substitutions[c] if not gx? and substitutions[c]?
     [gx, gy]
 
 # These images store the glyph atlases, one per strike & ribbon colour
@@ -990,6 +990,7 @@ drawPage = (ctx, p, ppi)->
   text = layout.text
   strike = (img, c, px, py)->
     [gx, gy] = glyph c
+    return unless gx? # A key the machine doesn't have strikes nothing, leaving a blank space
     ctx.drawImage img, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
 
   # Where a line wraps in the middle of an underlined (or struck through, or X'd out) phrase, the typist stops at the

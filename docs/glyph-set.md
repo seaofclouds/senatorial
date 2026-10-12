@@ -1,106 +1,57 @@
--># Olympia SM9 Glyph Set<-
+-># Senatorial Character Set<-
 
-->Every key in the atlas, as the machine strikes it.<-
+->Draw each missing character in its blank space.<-
 
-! " \# $ % \_ & ' ( ) \* +
+**Number row**
+           \` 1 2 3 4 5 6 7 8 9 0 \- \=
 
-1 2 3 4 5 6 7 8 9 0 \- \=
+shift      \~ ! @ \# $ % ^ & \* ( ) \_ +
 
-Q W E R T Y U I O P ¼
+option       ¡ ™ £ ¢ ∞ § ¶ • ª º – ≠
 
-q w e r t y u i o p ½
+shift opt    ⁄ € ‹ › ﬁ ﬂ ‡ ° · ‚ — ±
 
-A S D F G H J K L : @
+**Top row**
+           q w e r t y u i o p [ ] \\
 
-a s d f g h j k l ; ¢
+shift      Q W E R T Y U I O P { } \|
 
-Z X C V B N M , . ?
+option     œ ∑ ´ ® † ¥ ¨ ˆ ø π “ ‘ «
 
-z x c v b n m , . /
+shift opt  Œ „   ‰ ˇ Á     Ø ∏ ” ’ »
 
-`Light`
-`! " \# $ % \_ & ' ( ) \* +   1 2 3 4 5 6 7 8 9 0 \- \=`
-`Q W E R T Y U I O P ¼   q w e r t y u i o p ½`
-`A S D F G H J K L : @   a s d f g h j k l ; ¢`
-`Z X C V B N M , . ?   z x c v b n m , . /`
+**Home row**
+           a s d f g h j k l ; '
 
-**Double**
-**! " \# $ % \_ & ' ( ) \* +   1 2 3 4 5 6 7 8 9 0 \- \=**
-**Q W E R T Y U I O P ¼   q w e r t y u i o p ½**
-**A S D F G H J K L : @   a s d f g h j k l ; ¢**
-**Z X C V B N M , . ?   z x c v b n m , . /**
+shift      A S D F G H J K L : "
 
-==Red==
-==! " \# $ % \_ & ' ( ) \* +   1 2 3 4 5 6 7 8 9 0 \- \===
-==Q W E R T Y U I O P ¼   q w e r t y u i o p ½==
-==A S D F G H J K L : @   a s d f g h j k l ; ¢==
-==Z X C V B N M , . ?   z x c v b n m , . /==
+option     å ß ∂ ƒ © ˙ ∆ ˚ ¬ … æ
 
--># To Draw<-
+shift opt  Å Í Î Ï ˝ Ó Ô   Ò Ú Æ
 
-->Draw each in the gap between the x's, at their size.<-
-->Three tries each. Cross out or add your own.<-
+**Bottom row**
+           z x c v b n m , . /
 
-**Keyboard**
-backtick              Hx xH      Hx xH      Hx xH
+shift      Z X C V B N M \< > ?
 
-tilde                 Hx xH      Hx xH      Hx xH
+option     Ω ≈ ç √ ∫ ˜ µ ≤ ≥ ÷
 
-left square bracket   Hx xH      Hx xH      Hx xH
+shift opt  ¸ ˛ Ç ◊ ı   Â ¯ ˘ ¿
 
-right square bracket  Hx xH      Hx xH      Hx xH
+**Accents**
+grave      à è ì ò ù À È Ì Ù
 
-left curly brace      Hx xH      Hx xH      Hx xH
+acute      á é í ó ú ý É Ý
 
-right curly brace     Hx xH      Hx xH      Hx xH
+circumflex â ê î ô û Ê Û
 
-pipe                  Hx xH      Hx xH      Hx xH
+umlaut     ä ë ï ö ü ÿ Ä Ë Ö Ü Ÿ
 
-backslash             Hx xH      Hx xH      Hx xH
+tilde      ã ñ õ Ã Ñ Õ
 
-less than             Hx xH      Hx xH      Hx xH
+**Extras**
+Latin      ð Ð þ Þ ¹ ² ³ ¾ × ¦ ¤
 
-greater than          Hx xH      Hx xH      Hx xH
+arrows     ← → ↑ ↓ ↵
 
-caret                 Hx xH      Hx xH      Hx xH
-
-**Arrows**
-left arrow            Hx xH      Hx xH      Hx xH
-
-right arrow           Hx xH      Hx xH      Hx xH
-
-up arrow              Hx xH      Hx xH      Hx xH
-
-down arrow            Hx xH      Hx xH      Hx xH
-
-return arrow          Hx xH      Hx xH      Hx xH
-
-**Editorial marks**
-insert caret          Hx xH      Hx xH      Hx xH
-
-check mark            Hx xH      Hx xH      Hx xH
-
-cross mark            Hx xH      Hx xH      Hx xH
-
-star                  Hx xH      Hx xH      Hx xH
-
-bullet                Hx xH      Hx xH      Hx xH
-
-pilcrow               Hx xH      Hx xH      Hx xH
-
-section sign          Hx xH      Hx xH      Hx xH
-
-dagger                Hx xH      Hx xH      Hx xH
-
-double dagger         Hx xH      Hx xH      Hx xH
-
-degree                Hx xH      Hx xH      Hx xH
-
-**Your own**
-\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_  Hx xH      Hx xH      Hx xH
-
-\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_  Hx xH      Hx xH      Hx xH
-
-\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_  Hx xH      Hx xH      Hx xH
-
-\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_  Hx xH      Hx xH      Hx xH
+editing    ‸ ✓ ✗ ★
