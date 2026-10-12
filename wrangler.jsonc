@@ -1,0 +1,8 @@
+// Deploys Senatorial as a static site on Cloudflare Workers (no build step).
+{
+  "name": "senatorial",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "."
+  }
+}
