@@ -10,7 +10,7 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
 - Click the strip above the sheet to set a tab stop; drag one away to clear it. The mark in the middle is the sheet's centre.
 - On a phone, swipe sideways to slide the sheet.
 - Select text to restrike it light, double struck, in red, in capitals, underlined, struck through, or X'd out — each
-  done the typist's way, by striking another key over the letters. The alignment lever centres the paragraph you're in.
+  done the typist's way, by striking another key over the letters. The alignment lever sets the paragraph you're in flush left, centred, or flush right.
 - The margin tabs, tab stops, and line space lever stay hidden until you point at the strip above a sheet or the margin
   to its left (on a phone, tap there).
 - Tap the paper size in the corner of the sheet to feed in a different kind of paper.
@@ -31,6 +31,7 @@ on the page and take up no room on the grid — and typing them by hand works to
 | Struck through | `~~text~~` |
 | X'd out | `~~~text~~~` |
 | Centred line | `->text<-` |
+| Flush right line | `->text->` |
 
 Capitals are typed over the letters themselves, like shift lock. A backslash before a marker character prints it as is.
 

@@ -138,10 +138,10 @@ loadAtlases = ()->
 # STYLE ###########################################################################################
 
 # Every character on the page remembers how it was struck: regular, light, or double struck, on the black or red half
-# of the ribbon, underlined, struck through, or X'd out — and whether its paragraph is centred.
+# of the ribbon, underlined, struck through, or X'd out — and whether its paragraph is centred or flush right.
 # Each character's style is packed into one character code, so a document's styles are a string alongside its text.
 weights = ["regular", "light", "double"]
-flags = ["red", "center", "underline", "strike", "xout"]
+flags = ["red", "center", "underline", "strike", "xout", "right"]
 encodeStyle = (style)->
   v = Math.max 0, weights.indexOf style.weight
   v |= 4 << k for flag, k in flags when style[flag]
@@ -151,7 +151,10 @@ decodeStyle = (code)->
   style = weight: weights[v & 3] ? "regular"
   style[flag] = (v & (4 << k)) isnt 0 for flag, k in flags
   style
-styleCenter = (code)-> decodeStyle(code).center
+styleAlign = (code)->
+  style = decodeStyle code
+  if style.center then "center" else if style.right then "right" else "left"
+alignStyle = (align)-> center: align is "center", right: align is "right"
 
 # A paragraph runs up to & including its carriage return (or form feed)
 breaks = ["\n", "\f"]
@@ -164,13 +167,13 @@ paragraphEnd = (text, i)->
 
 # A paragraph's alignment is carried by its first character, or its carriage return if it's empty.
 # The styles string has one extra entry past the end of the text, which carries the alignment of an empty last line.
-centeredAt = (text, codes, i)-> styleCenter codes[paragraphStart text, i] ? encodeStyle {}
+alignAt = (text, codes, i)-> styleAlign codes[paragraphStart text, i] ? encodeStyle {}
 
 # MARKDOWN ########################################################################################
 
 # The text behind the page is Markdown. Its markers are invisible on the page and take up no room on the grid:
 #   **double struck**   `light`   _underlined_ (or *underlined*)   ==red ribbon==
-#   ~~struck through~~   ~~~X'd out~~~   and a whole line wrapped in -> and <- is centred
+#   ~~struck through~~   ~~~X'd out~~~   and a whole line wrapped in -> and <- is centred, or in -> and -> flush right
 # A backslash makes the next marker character print as itself.
 
 delimiters = # marker character → length of the run → what it does
@@ -190,8 +193,11 @@ parseLine = (line)->
   kinds = new Array(n).fill "text"
   start = 0
   end = n
-  center = n >= 4 and line.startsWith("->") and line.endsWith("<-")
-  if center
+  align =
+    if n >= 4 and line.startsWith("->") and line.endsWith("<-") then "center"
+    else if n >= 4 and line.startsWith("->") and line.endsWith("->") then "right"
+    else "left"
+  if align isnt "left"
     kinds[0] = kinds[1] = "blockOpen"
     kinds[n - 2] = kinds[n - 1] = "blockClose"
     start = 2
@@ -240,12 +246,12 @@ parseLine = (line)->
 
   # Each printed character takes on the style of every span it's in — the innermost wins for the strike
   styles = new Array n
-  styles[x] = {weight: "regular", center} for x in [0...n] when kinds[x] is "text"
+  styles[x] = Object.assign {weight: "regular"}, alignStyle align for x in [0...n] when kinds[x] is "text"
   spans.sort (a, b)-> (b.to - b.from) - (a.to - a.from)
   for span in spans
     for x in [span.from...span.to] when kinds[x] is "text"
       if span.type in weights then styles[x].weight = span.type else styles[x][span.type] = true
-  {kinds, styles, center}
+  {kinds, styles, align}
 
 # Read a whole document: the printed text, a style for each printed character (plus one for the end),
 # where each printed character sits in the Markdown, and what every Markdown character is
@@ -271,12 +277,12 @@ parseMarkdown = (raw)->
     visBefore[b] = chars.length
     kinds.push "text"
     chars.push raw[b]
-    codes.push encodeStyle center: line.center
+    codes.push encodeStyle alignStyle line.align
     rawOf.push b
     lineStart = b + 1
   visBefore[raw.length] = chars.length
   rawOf.push raw.length
-  codes.push encodeStyle center: line.center # The end of the text carries the last line's alignment
+  codes.push encodeStyle alignStyle line.align # The end of the text carries the last line's alignment
   {raw, text: chars.join(""), styles: codes.join(""), rawOf, kinds, visBefore}
 
 # Spans open outermost-first in this order, so light text with an underline reads `_like this_`
@@ -310,7 +316,7 @@ trimSpans = (chars, styles)->
       i = j
   styles
 
-writeLine = (chars, styles, center, opts)->
+writeLine = (chars, styles, align, opts)->
   out = ""
   stack = []
   for c, i in chars
@@ -325,25 +331,27 @@ writeLine = (chars, styles, center, opts)->
       stack.push type
     out += if opts.escape and c in escapable then "\\" + c else c
   out += markerFor type, opts for type in stack.slice().reverse()
-  if center
+  if align is "center"
     "->#{out}<-"
-  else if out.startsWith("->") and out.endsWith("<-")
-    "\\" + out # Don't let it read as centred
+  else if align is "right"
+    "->#{out}->"
+  else if out.length >= 4 and out.startsWith("->") and (out.endsWith("<-") or out.endsWith("->"))
+    "\\" + out # Don't let it read as centred or flush right
   else
     out
 
 # Write one line of styled characters as Markdown, and check it reads back the same.
 # If it doesn't (say, a stray asterisk that would pair up), try escaping the marker characters.
-serializeLine = (chars, codes, center)->
+serializeLine = (chars, codes, align)->
   styles = trimSpans chars, (decodeStyle c for c in codes)
-  want = (encodeStyle Object.assign s, {center} for s in styles).join ""
+  want = (encodeStyle Object.assign s, alignStyle align for s in styles).join ""
   attempts = [{underline: "_"}, {underline: "*"}, {underline: "_", escape: true}, {underline: "*", escape: true}]
   for opts in attempts
-    md = writeLine chars, styles, center, opts
+    md = writeLine chars, styles, align, opts
     back = parseLine md
     printed = (md[x] for kind, x in back.kinds when kind is "text").join ""
     codesBack = (encodeStyle back.styles[x] for kind, x in back.kinds when kind is "text").join ""
-    return md if printed is chars.join("") and codesBack is want and back.center is center
+    return md if printed is chars.join("") and codesBack is want and back.align is align
   md
 
 # Write a run of whole paragraphs back into Markdown. codes has a style for each character — plus one more when the
@@ -354,8 +362,7 @@ serializeBlock = (text, codes)->
   loop
     j = i
     j++ while j < text.length and text[j] not in breaks
-    center = styleCenter codes[i]
-    out += serializeLine Array.from(text.slice i, j), codes.slice(i, j), center
+    out += serializeLine Array.from(text.slice i, j), codes.slice(i, j), styleAlign codes[i]
     break if j is text.length
     out += text[j]
     i = j + 1
@@ -401,7 +408,7 @@ doLayout = (g)->
     else
       if page isnt last?.page
         pages.push {start: i, firstLine: lines.length}
-      lines.push {page, line, start: i, end: i, center: centeredAt text, doc.styles, i}
+      lines.push {page, line, start: i, end: i, align: alignAt text, doc.styles, i}
 
   i = 0
   while i < n
@@ -431,14 +438,15 @@ doLayout = (g)->
         col++
   place n
 
-  # Centred lines are spaced in from the left margin by half the room left over, landing on the grid
-  # the same way a typist would centre a line by backspacing from the middle
+  # Centred lines are spaced in from the left margin by half the room left over, and flush right lines by all of it,
+  # landing on the grid the same way a typist would backspace from the middle or from the right margin
   blank = [" ", "\n", "\t", "\f"]
-  for ln in lines when ln.center
+  for ln in lines when ln.align isnt "left"
     last = null
     last = i for i in [ln.start..ln.end] when i < n and text[i] not in blank
     width = if last? then pos[last][2] + 1 - g.left else 0
-    shift = Math.max 0, Math.floor (g.right - g.left - width) / 2
+    room = Math.max 0, g.right - g.left - width
+    shift = if ln.align is "center" then Math.floor room / 2 else room
     pos[i][2] += shift for i in [ln.start..ln.end]
 
   for p, k in pages
@@ -526,11 +534,14 @@ makePageView = ()->
   pagesElm.insertBefore elm, selectionElm
   {elm, canvas, guide, label, strip, top, bottom, spacing, ctx: canvas.getContext("2d"), key: null}
 
-# Three little engraved lines, spaced apart by gap, flush left or centred
+# Three little engraved lines, spaced apart by gap — flush left, centred, or flush right
 linesIcon = (gap, align)->
-  widths = if align is "center" then [10, 6, 10] else [10, 10, 10]
+  widths = if align in ["center", "right"] then [10, 6, 10] else [10, 10, 10]
   lines = for w, k in widths
-    x1 = if align is "center" then 10 - w / 2 else 5
+    x1 = switch align
+      when "center" then 10 - w / 2
+      when "right" then 15 - w
+      else 5
     y = 10 + (k - 1) * gap
     "<line x1='#{x1}' x2='#{x1 + w}' y1='#{y}' y2='#{y}'/>"
   "<svg viewBox='0 0 20 20'>#{lines.join ""}</svg>"
@@ -800,12 +811,12 @@ replaceRaw = (start, end, str)->
 
 # Replace printed characters [a, b) with ins (styled insCodes), then rewrite every paragraph it touched as Markdown,
 # so spans stay balanced however the text around them changes
-edit = (a, b, ins, insCodes, select, endCenter, follow = true)->
+edit = (a, b, ins, insCodes, select, endAlign, follow = true)->
   {text, styles} = doc
   newText = text.slice(0, a) + ins + text.slice(b)
   newCodes = styles.slice(0, a) + insCodes + styles.slice(b)
-  if endCenter?
-    newCodes = newCodes.slice(0, -1) + encodeStyle Object.assign decodeStyle(newCodes.slice -1), center: endCenter
+  if endAlign?
+    newCodes = newCodes.slice(0, -1) + encodeStyle Object.assign decodeStyle(newCodes.slice -1), alignStyle endAlign
   start = paragraphStart text, a
   end = paragraphEnd text, b
   newEnd = end + ins.length - (b - a)
@@ -816,11 +827,11 @@ edit = (a, b, ins, insCodes, select, endCenter, follow = true)->
   [anchor, focus] = select ? [a + ins.length, a + ins.length]
   setSelection anchor, focus, follow
 
-# Type over the selection (or into an empty centred line), keeping the style of what's being replaced
+# Type over the selection (or into an empty centred or flush right line), keeping the style of what's being replaced
 typeText = (str)->
   [a, b] = selected()
   style = if a < b then decodeStyle doc.styles[a] else {}
-  style.center = centeredAt doc.text, doc.styles, a
+  Object.assign style, alignStyle alignAt doc.text, doc.styles, a
   edit a, b, str, encodeStyle(style).repeat(str.length)
 
 isBlank = (c)-> c? and blankChar.test(c) and c not in breaks
@@ -863,9 +874,9 @@ input.addEventListener "beforeinput", (e)->
   return if applying
   [a, b] = selected()
   t = e.inputType
-  emptyCentredLine = a is b and centeredAt(doc.text, doc.styles, a) and paragraphStart(doc.text, a) is a and doc.text[a] in [undefined, "\n", "\f"] and
-    not input.value.slice(0, input.selectionStart).endsWith "->"
-  if t in ["insertText", "insertReplacementText"] and (a < b or emptyCentredLine)
+  emptyAlignedLine = a is b and alignAt(doc.text, doc.styles, a) isnt "left" and paragraphStart(doc.text, a) is a and
+    doc.text[a] in [undefined, "\n", "\f"] and not input.value.slice(0, input.selectionStart).endsWith "->"
+  if t in ["insertText", "insertReplacementText"] and (a < b or emptyAlignedLine)
     e.preventDefault()
     typeText e.data ? e.dataTransfer?.getData("text/plain") ? ""
   else if t in ["insertLineBreak", "insertParagraph"]
@@ -922,17 +933,17 @@ toggleCaps = ()->
     capsMemory.set replacement, seg
   edit a, b, replacement, doc.styles.slice(a, b), [anchor, focus], null, false
 
-# Centre (or un-centre) every paragraph the selection touches — or just the one the caret is in
-setCenter = (center)->
+# Align every paragraph the selection touches — or just the one the caret is in
+setAlign = (align)->
   [a, b] = selected()
   [anchor, focus] = getAnchorFocus()
   text = doc.text
   b-- if b > a and text[b - 1] in breaks # A selection ending just after a carriage return stops at that line
   start = paragraphStart text, a
   end = paragraphEnd text, b
-  codes = (encodeStyle Object.assign decodeStyle(c), {center} for c in doc.styles.slice start, end).join ""
-  endCenter = if end is text.length then center else null
-  edit start, end, text.slice(start, end), codes, [anchor, focus], endCenter, false
+  codes = (encodeStyle Object.assign decodeStyle(c), alignStyle align for c in doc.styles.slice start, end).join ""
+  endAlign = if end is text.length then align else null
+  edit start, end, text.slice(start, end), codes, [anchor, focus], endAlign, false
 
 # A little menu that pops up over a selection, for striking it differently
 renderFormatMenu = ()->
@@ -1012,16 +1023,15 @@ spacings = [1, 1.5, 2]
 
 chooser = $ ".chooser"
 
-# Flush left or centred, for the paragraph the caret is in
-alignments = ["left", "center"]
-alignLever = makeLever "align", alignments, ((a)-> linesIcon 4, a), ((a)-> setCenter a is "center")
-alignLever.title = "Flush left or centred"
+# Flush left, centred, or flush right, for the paragraph the caret is in
+alignments = ["left", "center", "right"]
+alignLever = makeLever "align", alignments, ((a)-> linesIcon 4, a), setAlign
+alignLever.title = "Flush left, centred, or flush right"
 alignLever.classList.add "spacer"
 $(".buttons").prepend alignLever
 
 syncAlign = ()->
-  center = centeredAt doc.text, doc.styles, focusIndex()
-  setLever alignLever, alignments, if center then "center" else "left"
+  setLever alignLever, alignments, alignAt doc.text, doc.styles, focusIndex()
 
 paperName = ()->
   if settings.paper is "custom"
