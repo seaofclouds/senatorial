@@ -994,6 +994,18 @@ drawPage = (ctx, p, ppi)->
     [gx, gy] = glyph c
     ctx.drawImage img, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
 
+  # Where a line wraps in the middle of an underlined (or struck through, or X'd out) phrase, the typist stops at the
+  # last letter on the line and starts again at the first one on the next: the spaces around the wrap go bare
+  bare = new Set
+  blank = (k)-> text[k] in [" ", "\n", "\f", cellBreak, cellLineBreak]
+  for ln in layout.lines when ln.page is p
+    a = ln.start
+    a++ while a <= ln.end and blank a
+    z = ln.end
+    z-- while z >= a and blank z
+    bare.add k for k in [ln.start...a]
+    bare.add k for k in [z + 1..ln.end] by 1 when z < ln.end
+
   for i in [start...Math.min end, layout.n]
     c = text[i]
     continue if c in ["\n", "\t", "\f", cellBreak, cellLineBreak]
@@ -1004,6 +1016,7 @@ drawPage = (ctx, p, ppi)->
     px = col * gw
     py = lineTop(geo, line) * atlasDPI + verticalAlign
     strike img, c, px, py unless c is " "
+    continue if bare.has i
     # Underlining, striking through, and X-ing out are done the typist's way:
     # another key struck over the same spot, ink on ink
     strike img, "_", px, py if style.underline
