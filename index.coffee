@@ -37,6 +37,7 @@ defaults =
   tabs: [] # tab stops, in columns from the left edge of the paper. When empty, there's a stop every 5 columns.
   atlas: "regular"
   red: false
+  center: false # how the very first line is aligned, before anything's been typed
 
 defaultTabInterval = 5
 
@@ -115,12 +116,31 @@ glyph = (c)->
     [gx, gy] = getGlyphPosInAtlas "*" unless gx? and gy?
     [gx, gy]
 
-# Every character remembers how it was struck: regular, light, or double struck, on the black or red half of the ribbon.
-# Styles are kept as a string with one digit per character, running alongside the text.
+# Every character remembers how it was struck: regular, light, or double struck, on the black or red half of the ribbon,
+# and whether its paragraph is centred. Styles are kept as a string with one base-36 digit per character, alongside the text.
 weights = ["regular", "light", "double"]
-styleCode = (weight, red)-> String weights.indexOf(weight) * 2 + (if red then 1 else 0)
-styleWeight = (code)-> weights[+code >> 1]
-styleRed = (code)-> (+code & 1) is 1
+styleCode = (weight, red, center = false)->
+  (weights.indexOf(weight) * 2 + (if red then 1 else 0) + (if center then 6 else 0)).toString 36
+styleValue = (code)-> parseInt code, 36
+styleWeight = (code)-> weights[(styleValue(code) % 6) >> 1]
+styleRed = (code)-> (styleValue(code) & 1) is 1
+styleCenter = (code)-> styleValue(code) >= 6
+
+# A paragraph runs up to & including its carriage return (or form feed)
+breaks = ["\n", "\f"]
+paragraphStart = (text, i)->
+  i-- while i > 0 and text[i - 1] not in breaks
+  i
+paragraphEnd = (text, i)->
+  i++ while i < text.length and text[i] not in breaks
+  Math.min i + 1, text.length
+
+# A paragraph's alignment is carried by its first character. An empty last line follows the line before it.
+centeredAt = (text, codes, i)->
+  s = paragraphStart text, i
+  if s < text.length then styleCenter codes[s]
+  else if s > 0 then styleCenter codes[s - 1]
+  else settings.center
 
 # These images store the glyph atlases, one per strike & ribbon colour
 atlases = {}
@@ -180,7 +200,7 @@ doLayout = (g)->
     else
       if page isnt last?.page
         pages.push {start: i, firstLine: lines.length}
-      lines.push {page, line, start: i, end: i}
+      lines.push {page, line, start: i, end: i, center: centeredAt text, styles, i}
 
   i = 0
   while i < n
@@ -209,6 +229,16 @@ doLayout = (g)->
         place i++
         col++
   place n
+
+  # Centred lines are spaced in from the left margin by half the room left over, landing on the grid
+  # the same way a typist would centre a line by backspacing from the middle
+  blank = [" ", "\n", "\t", "\f"]
+  for ln in lines when ln.center
+    last = null
+    last = i for i in [ln.start..ln.end] when i < n and text[i] not in blank
+    width = if last? then pos[last][2] + 1 - g.left else 0
+    shift = Math.max 0, Math.floor (g.right - g.left - width) / 2
+    pos[i][2] += shift for i in [ln.start..ln.end]
 
   for p, k in pages
     p.end = pages[k + 1]?.start ? n + 1
@@ -251,10 +281,6 @@ input = $ ".input"
 deckElm = $ ".ui"
 formatMenu = $ ".format"
 
-# The carriage pointer, which rides along the top of whichever sheet you're typing on
-carriageElm = document.createElement "div"
-carriageElm.className = "carriage"
-
 pageViews = []
 renderVersion = 0
 geo = null
@@ -292,9 +318,41 @@ makePageView = ()->
   bottom = document.createElement "div"
   bottom.className = "flag across vstop"
   bottom.dataset.kind = "bottom"
-  elm.append canvas, guide, label, strip, top, bottom
+  spacing = makeLever "spacing", spacings, ((s)-> linesIcon 3 * s, "left"), ((s)-> changeSettings spacing: s)
+  spacing.title = "Line spacing"
+  elm.append canvas, guide, label, strip, top, bottom, spacing
   pagesElm.insertBefore elm, selectionElm
-  {elm, canvas, guide, label, strip, top, bottom, ctx: canvas.getContext("2d"), key: null}
+  {elm, canvas, guide, label, strip, top, bottom, spacing, ctx: canvas.getContext("2d"), key: null}
+
+# Three little engraved lines, spaced apart by gap, flush left or centred
+linesIcon = (gap, align)->
+  widths = if align is "center" then [10, 6, 10] else [10, 10, 10]
+  lines = for w, k in widths
+    x1 = if align is "center" then 10 - w / 2 else 5
+    y = 10 + (k - 1) * gap
+    "<line x1='#{x1}' x2='#{x1 + w}' y1='#{y}' y2='#{y}'/>"
+  "<svg viewBox='0 0 20 20'>#{lines.join ""}</svg>"
+
+# A lever that clicks into one of a few positions, like the line space lever on an Olympia SM9
+makeLever = (name, values, icon, choose)->
+  lever = document.createElement "div"
+  lever.className = "lever #{name}"
+  lever.innerHTML = "<span class='knob'></span>"
+  for value in values
+    do (value)->
+      btn = document.createElement "button"
+      btn.dataset.value = value
+      btn.innerHTML = icon value
+      btn.addEventListener "pointerdown", (e)-> e.preventDefault() # Keep typing where you were
+      btn.onclick = ()-> choose value
+      lever.append btn
+  lever
+
+setLever = (lever, values, value)->
+  k = Math.max 0, values.indexOf value
+  lever.style.setProperty "--position", k
+  btn.classList.toggle "active", i is k for btn, i in lever.querySelectorAll "button"
+  null
 
 render = ()->
   return unless settings?
@@ -332,6 +390,8 @@ render = ()->
     view.bottom.style.top = (g.h - g.bottom / linesPerInch) * pxPerInch + "px"
     view.bottom.textContent = g.bottom
     view.bottom.title = "Bottom margin: #{g.bottom} lines (#{fmt g.bottom / linesPerInch} in) · #{g.linesPerPage} lines per page"
+    view.spacing.style.top = g.top / linesPerInch * pxPerInch + 16 + "px"
+    setLever view.spacing, spacings, settings.spacing
     renderStrip view, g
 
     # Only redraw pages whose contents actually changed
@@ -341,6 +401,7 @@ render = ()->
       view.key = key
       drawPage view.ctx, p, pw / g.w
 
+  slideCarriage carriageX
   renderSelection()
 
 # Draw one page onto a canvas, at the given pixels per inch (screen, or exportDPI for saving)
@@ -371,10 +432,11 @@ drawPage = (ctx, p, ppi)->
     ctx.drawImage img, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
   null
 
-# Along the top of each sheet: the left & right margin tabs, the tab stops, and the carriage pointer
+# Along the top of each sheet: the left & right margin tabs, the tab stops, and the centre mark
 renderStrip = (view, g)->
   step = pxPerInch / charactersPerInch
   marks = [
+    {kind: "center", col: g.w * charactersPerInch / 2, title: "Centre of the sheet"}
     {kind: "left", col: g.left, title: "Left margin at #{g.left} (#{fmt g.left / charactersPerInch} in)"}
     {kind: "right", col: g.right, title: "Right margin at #{g.right} (#{fmt (g.cols - g.right) / charactersPerInch} in from the edge) · #{g.right - g.left} characters per line"}
   ]
@@ -393,6 +455,7 @@ renderStrip = (view, g)->
     e.className = "mark " + switch mark.kind
       when "left", "right" then "flag down"
       when "tab" then "tabstop"
+      when "center" then "center-mark"
       else "default-tab"
     e.classList.toggle "removing", drag?.kind is "tab" and drag.index is mark.index and drag.removing
     e.classList.toggle "dragging", drag?.kind is mark.kind and (mark.kind isnt "tab" or drag.index is mark.index)
@@ -425,13 +488,6 @@ renderSelection = ()->
   Object.assign caretElm.style, left: c.x - 1 + "px", top: c.y + "px", height: c.h + "px"
   Object.assign input.style, left: c.x + "px", top: c.y + "px", height: c.h + "px"
 
-  # The carriage pointer rides along the top of the sheet you're typing on
-  [page, _, col] = layout.pos[focus]
-  strip = pageViews[page].strip
-  strip.append carriageElm unless carriageElm.parentNode is strip
-  carriageElm.style.left = col / charactersPerInch * pxPerInch + "px"
-  moveCarriage col
-
   # Restart the blink so the caret is visible while it's moving
   caretElm.style.animation = "none"
   caretElm.offsetWidth
@@ -450,22 +506,28 @@ renderSelection = ()->
       rects.push "<div style='left:#{p0.x}px;top:#{p0.y}px;width:#{Math.max 2, x1 - p0.x}px;height:#{p0.h}px'></div>"
   selectionElm.innerHTML = rects.join ""
   renderFormatMenu()
+  syncAlign()
 
-# When the sheet is wider than the screen, it slides side to side to keep the strike point in view, like a carriage
-moveCarriage = (col)->
+# When the sheet is wider than the screen, it slides side to side like a carriage. Typing brings the strike
+# point to the middle; clicking, tapping, and selecting leave the sheet where it is, so you can aim at it.
+carriageX = 0
+gutterL = 64 # room for the top & bottom margin tabs and the line space lever
+gutterR = 16
+
+sheetFits = ()-> geo.w * pxPerInch + gutterL + gutterR <= pagesElm.clientWidth
+
+slideCarriage = (tx)->
   avail = pagesElm.clientWidth
   sheetW = geo.w * pxPerInch
-  gutterL = 56 # room for the top & bottom margin tabs
-  gutterR = 16
-  tx =
-    if sheetW + gutterL + gutterR <= avail
-      (avail - sheetW) / 2
-    else
-      clamp avail / 2 - col / charactersPerInch * pxPerInch, avail - sheetW - gutterR, gutterL
-  carriageX = Math.round tx
+  carriageX = Math.round if sheetFits() then (avail - sheetW) / 2 else clamp tx, avail - sheetW - gutterR, gutterL
   pagesElm.style.translate = "#{carriageX}px"
 
-carriageX = 0
+# Bring the strike point to the middle of the screen, and the line being typed above the machine
+followCaret = ()->
+  col = layout.pos[focusIndex()][2]
+  slideCarriage pagesElm.clientWidth / 2 - col / charactersPerInch * pxPerInch
+  renderFormatMenu()
+  scrollCaretIntoView()
 
 fmt = (v)-> +v.toFixed 2
 
@@ -483,7 +545,7 @@ scrollCaretIntoView = ()->
 saveStyles = ()->
   try localStorage.setItem "styles", styles
 
-typingStyle = ()-> styleCode settings.atlas, settings.red
+typingStyle = (center = false)-> styleCode settings.atlas, settings.red, center
 
 # Keep the styles lined up with the text after every edit. The edit can't begin after where the
 # selection started, which pins down where a repeated letter was inserted.
@@ -500,7 +562,9 @@ syncStyles = ()->
   s = 0
   s++ while s < Math.min(old.length, text.length) - p and old[old.length - 1 - s] is text[text.length - 1 - s]
   inserted = text.length - p - s
-  styles = styles.slice(0, p) + typingStyle().repeat(inserted) + styles.slice(old.length - s)
+  # New letters take on the alignment of the paragraph they're typed into
+  center = centeredAt old, styles, p
+  styles = styles.slice(0, p) + typingStyle(center).repeat(inserted) + styles.slice(old.length - s)
   lastText = text
   saveStyles()
 
@@ -514,8 +578,24 @@ restyle = (fn)->
   render()
   true
 
-setWeight = (weight)-> restyle (c)-> styleCode weight, styleRed c
-setRed = (red)-> restyle (c)-> styleCode styleWeight(c), red
+setWeight = (weight)-> restyle (c)-> styleCode weight, styleRed(c), styleCenter(c)
+setRed = (red)-> restyle (c)-> styleCode styleWeight(c), red, styleCenter(c)
+
+# Centre (or un-centre) every paragraph the selection touches — or just the one the caret is in
+setCenter = (center)->
+  text = input.value
+  a = input.selectionStart
+  b = input.selectionEnd
+  b-- if b > a and text[b - 1] in breaks # A selection ending just after a carriage return stops at that line
+  start = paragraphStart text, a
+  start-- if start is text.length and start > 0 # An empty last line takes its alignment from the line before
+  end = paragraphEnd text, b
+  styles = styles.slice(0, start) + (styleCode styleWeight(c), styleRed(c), center for c in styles.slice start, end).join("") + styles.slice(end)
+  settings.center = center if text.length is 0 # Nothing typed yet, so remember it for the first line
+  saveStyles()
+  save "settings", settings
+  render()
+  syncControls()
 
 # A little menu that pops up over a selection, for striking it differently
 renderFormatMenu = ()->
@@ -586,21 +666,20 @@ normalize = ()->
 spacings = [1, 1.5, 2]
 
 controls = {}
-controls[id] = $ "#" + id for id in ["spacing", "red"]
+controls[id] = $ "#" + id for id in ["red"]
 atlasBtns = {}
 atlasBtns[id] = $ "#" + id for id in weights
 chooser = $ ".chooser"
 
-# Engrave each lever position with three little lines, spaced the way that setting feeds the paper
-spacingBtns = for s in spacings
-  do (s)->
-    gap = 3 * s
-    btn = document.createElement "button"
-    btn.title = "#{if s is 1 then "Single" else if s is 2 then "Double" else "1½"} spacing"
-    btn.innerHTML = "<svg viewBox='0 0 20 20'>" + ("<line x1='5' x2='15' y1='#{10 + k * gap}' y2='#{10 + k * gap}'/>" for k in [-1..1]).join("") + "</svg>"
-    btn.onclick = ()-> changeSettings spacing: s
-    controls.spacing.append btn
-    btn
+# Flush left or centred, for the paragraph the caret is in
+alignments = ["left", "center"]
+alignLever = makeLever "align", alignments, ((a)-> linesIcon 4, a), ((a)-> setCenter a is "center")
+alignLever.title = "Flush left or centred"
+$("#red").after alignLever
+
+syncAlign = ()->
+  center = centeredAt input.value, styles, focusIndex()
+  setLever alignLever, alignments, if center then "center" else "left"
 
 paperName = ()->
   if settings.paper is "custom"
@@ -609,9 +688,6 @@ paperName = ()->
     papers[settings.paper].short + (if settings.landscape then " landscape" else "")
 
 syncControls = ()->
-  k = Math.max 0, spacings.indexOf settings.spacing
-  controls.spacing.style.setProperty "--position", k
-  btn.classList.toggle "active", i is k for btn, i in spacingBtns
   controls.red.checked = settings.red
   btn.classList.toggle "active", name is settings.atlas for name, btn of atlasBtns
   renderChooser() unless chooser.hidden
@@ -786,7 +862,8 @@ pagesElm.addEventListener "pointerdown", (e)->
 
 goalCol = null # Remember the column while moving up & down, like a real text editor
 
-setSelection = (anchor, focus)->
+# follow: slide the carriage to the new strike point (for the keyboard, but not for pointing at the page)
+setSelection = (anchor, focus, follow = true)->
   anchor = clamp anchor, 0, layout.n
   focus = clamp focus, 0, layout.n
   if focus < anchor
@@ -794,7 +871,7 @@ setSelection = (anchor, focus)->
   else
     input.setSelectionRange anchor, focus, "forward"
   renderSelection()
-  scrollCaretIntoView()
+  followCaret() if follow
 
 getAnchorFocus = ()->
   if input.selectionDirection is "backward"
@@ -858,13 +935,15 @@ input.addEventListener "keydown", (e)->
     moveToLineEdge e.key is "ArrowRight", e.shiftKey
   else
     # Let the textarea handle it, then catch up
-    requestAnimationFrame ()-> renderSelection()
+    requestAnimationFrame ()->
+      renderSelection()
+      followCaret()
 
 input.addEventListener "input", ()->
   syncStyles()
   saveText()
   render()
-  scrollCaretIntoView()
+  followCaret()
 
 for type in ["select", "selectionchange", "keyup"]
   input.addEventListener type, ()-> renderSelection()
@@ -896,9 +975,14 @@ hitTest = (e)->
 expand = (i, detail)->
   text = layout.text
   if detail is 2
+    # A word is letters, numbers, and apostrophes — or, between words, a run of punctuation
+    word = /[\p{L}\p{N}'’]/u
     a = b = i
-    a-- while a > 0 and /\S/.test text[a - 1]
-    b++ while b < text.length and /\S/.test text[b]
+    a = i - 1 if i > 0 and not word.test(text[i] ? "") and word.test text[i - 1]
+    kind = if word.test(text[a] ? "") then word else /[^\s\p{L}\p{N}'’]/u
+    a-- while a > 0 and kind.test text[a - 1]
+    b = a
+    b++ while b < text.length and kind.test text[b]
     [a, b]
   else
     ln = layout.lines[lineIndexOf i]
@@ -909,19 +993,19 @@ pointer = null
 # PointerEvent.detail isn't reliable across browsers, so count multi-clicks ourselves
 lastClick = time: 0, x: 0, y: 0, count: 0
 clickCount = (e)->
-  near = Math.hypot(e.clientX - lastClick.x, e.clientY - lastClick.y) < 6
+  near = Math.hypot(e.clientX - lastClick.x, e.clientY - lastClick.y) < (if e.pointerType is "touch" then 24 else 6)
   quick = e.timeStamp - lastClick.time < 450
   lastClick = time: e.timeStamp, x: e.clientX, y: e.clientY, count: if near and quick then lastClick.count % 3 + 1 else 1
   lastClick.count
 
 pagesElm.addEventListener "pointerdown", (e)->
   return unless e.target.closest ".page"
-  return if e.target.closest ".paper-label, .strip, .vstop"
+  return if e.target.closest ".paper-label, .strip, .vstop, .lever"
   return if e.button isnt 0
 
-  # On touch screens, a tap places the carriage, and a drag scrolls
+  # On touch screens, a tap places the carriage, a sideways swipe slides the sheet, and an up-down drag scrolls
   if e.pointerType is "touch"
-    pointer = touch: true, x: e.clientX, y: e.clientY
+    pointer = touch: true, x: e.clientX, y: e.clientY, tx: carriageX, sliding: false
     return
 
   e.preventDefault()
@@ -931,35 +1015,45 @@ pagesElm.addEventListener "pointerdown", (e)->
   count = clickCount e
   if count >= 2
     [a, b] = expand i, count
-    setSelection a, b
+    setSelection a, b, false
     pointer = anchor: a
   else
     [anchor] = getAnchorFocus()
     anchor = i unless e.shiftKey
-    setSelection anchor, i
+    setSelection anchor, i, false
     pointer = {anchor}
   pagesElm.setPointerCapture e.pointerId
 
 pagesElm.addEventListener "pointermove", (e)->
-  return unless pointer? and not pointer.touch
-  setSelection pointer.anchor, hitTest e
+  return unless pointer?
+  if pointer.touch
+    dx = e.clientX - pointer.x
+    if not pointer.sliding and Math.abs(dx) > 8 and Math.abs(dx) > Math.abs(e.clientY - pointer.y)
+      pointer.sliding = true
+      pagesElm.classList.add "sliding"
+    slideCarriage pointer.tx + dx if pointer.sliding
+  else
+    setSelection pointer.anchor, hitTest(e), false
 
 pagesElm.addEventListener "pointerup", (e)->
-  if pointer?.touch and Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) < 10
+  if pointer?.touch and not pointer.sliding and Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) < 10
     pointer = null
     input.focus preventScroll: true
     goalCol = null
     i = hitTest e
     count = clickCount e
-    if count >= 2 then setSelection expand(i, count)... else setSelection i, i
+    if count >= 2 then setSelection expand(i, count)..., false else setSelection i, i, false
   pointer = null
+  pagesElm.classList.remove "sliding"
   renderFormatMenu()
 
 # Mobile browsers follow a tap with a pretend mousedown that would pull focus off the page — stop it
 pagesElm.addEventListener "mousedown", (e)->
   e.preventDefault() if e.target.closest(".page") and not e.target.closest(".paper-label")
 
-pagesElm.addEventListener "pointercancel", ()-> pointer = null
+pagesElm.addEventListener "pointercancel", ()->
+  pointer = null
+  pagesElm.classList.remove "sliding"
 
 window.addEventListener "resize", ()-> render()
 
@@ -1008,7 +1102,7 @@ input.value = lastText = (try localStorage.getItem "text") ? ""
 
 # Text from before styles were kept per character is all in the machine's current style
 styles = (try localStorage.getItem "styles") ? ""
-styles = typingStyle().repeat input.value.length unless styles.length is input.value.length and /^[0-5]*$/.test styles
+styles = typingStyle().repeat input.value.length unless styles.length is input.value.length and /^[0-9ab]*$/.test styles
 
 syncControls()
 loadAtlases()
@@ -1017,4 +1111,4 @@ input.focus preventScroll: true
 input.setSelectionRange layout.n, layout.n
 renderSelection()
 updateFocus()
-scrollCaretIntoView()
+followCaret()

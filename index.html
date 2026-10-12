@@ -55,6 +55,8 @@
     gap: 3em;
     padding: 2em 0 1.5em;
     transition: translate .2s ease-out;
+    touch-action: pan-y pinch-zoom; /* Sideways swipes slide the sheet; this also stops double-tap zooming */
+    &.sliding { transition: none; }
   }
 
   .page {
@@ -201,8 +203,8 @@
     pointer-events: none;
   }
 
-  /* Shows where the next letter will strike */
-  .carriage {
+  /* The centre of the sheet, for lining things up by eye */
+  .center-mark {
     position: absolute;
     bottom: 0;
     width: 2px;
@@ -348,6 +350,31 @@
     button.active svg { stroke: hsl(28, 3%, 14%); }
   }
 
+  /* On the sheet, the line space lever stands upright along the left edge, under the top margin tab */
+  .lever.spacing {
+    position: absolute;
+    right: 100%;
+    margin-right: 5px;
+    flex-flow: column;
+    border: 3px solid hsl(36, 10%, 80%);
+    background: hsl(36, 12%, 88%);
+    box-shadow: none;
+    opacity: .7;
+    transition: opacity .15s;
+    &:hover { opacity: 1; }
+
+    .knob {
+      top: 2px;
+      left: 1px;
+      background: hsl(36, 10%, 72%);
+      translate: 0 calc(var(--position) * 20px);
+    }
+
+    button { width: 18px; height: 20px; }
+    svg { width: 18px; stroke: hsl(30, 5%, 58%); }
+    button.active svg { stroke: hsl(30, 5%, 32%); }
+  }
+
   /* Paper size, written lightly in the corner of the sheet */
   .paper-label {
     position: absolute;
@@ -482,7 +509,6 @@
       <button id="light">Light</button>
       <button id="double">Double Struck</button>
       <input type="checkbox" id="red" class="toggle spacer" role="switch" title="Red ribbon">
-      <div class="lever" id="spacing" title="Line spacing"><span class="knob"></span></div>
       <button id="reset">Reset</button>
       <button id="download">Save</button>
       <button id="print">Print</button>
