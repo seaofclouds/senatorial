@@ -1,210 +1,382 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Senatorial</title>
+
 <style>
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+
+  :root {
+    --chrome: hsl(30, 5%, 30%);
+    --chrome-dark: hsl(18, 4%, 19%);
+    --chrome-text: hsl(38, 8%, 78%);
+    --chrome-muted: hsl(38, 4%, 58%);
+    --button: hsl(38, 1%, 45%);
+    --button-active: hsl(18, 2%, 62%);
+    --button-text: hsl(22, 5%, 18%);
+    --desk: hsl(40 20% 90%);
+    --caret: hsl(0, 80%, 45%);
+    --selection: hsla(210, 90%, 55%, .25);
+    --guide: hsla(210, 60%, 50%, .25);
+  }
+
+  html, body { height: 100%; }
 
   body {
-    display: grid;
-    place-items: end center;
-    /* font-size: 11px; */
-    height: 100%;
-    margin: 0;
-    font-family: system-ui;
-    background: hsl(40 20% 90%);
-    overflow: auto;
-  }
-
-  section {
-    width: 100%;
-    max-width: 72em;
-    padding: 1.5em .5em;
-    opacity: 0;
-  }
-
-  canvas {
-    display: block;
-    margin-inline: auto;
-  }
-
-  canvas.text {
-    width: calc(100% - 8em);
-    background: white;
-    box-shadow: 0 .5px 1px #0001;
-    image-rendering: pixelated;
-  }
-
-  canvas.ruler {
-    width: calc(100% - 5em);
-    margin-top: .5px;
-    height: 40px;
-    z-index: 1;
-    -webkit-user-select: none;
-    user-select: none;
-    pointer-events: all;
-  }
-
-  .ui {
-    position: sticky;
-    bottom: 2em;
-    height: 14rem;
-    z-index: 1;
-    border-radius: 1em;
-    background: hsl(30, 5%, 30%);
-  }
-
-  textarea {
-    width: 100%;
-    height: 100%;
-    font-size: 2em;
-    scroll-padding: 3.8em 0;
-    padding: 3.8em 6.3em;
-    border: none;
-    font-family: monospace;
-    color: white;
-    background: none;
-    outline: none;
-    overscroll-behavior: contain;
-    resize: none;
-    scrollbar-width: none;
-    &::-webkit-scrollbar { display: none; }
-    &::selection {
-      background: hsl(30, 2%, 50%);
-    }
-  }
-
-  .overlay {
-    position: absolute;
-    inset: 0;
     display: flex;
     flex-flow: column;
-    padding: 0 1.5em 1.5em;
-    pointer-events: none;
-    background: linear-gradient(
-      hsl(30, 5%, 30%),
-      hsla(30, 5%, 30%, .9) 20%,
-      transparent 40%,
-      transparent 60%,
-      hsla(30, 5%, 30%, .9) 80%,
-      hsl(30, 5%, 30%)
-    );
-    border-radius: 1em;
+    margin: 0;
+    font-family: system-ui;
+    font-size: 14px;
+    background: var(--desk);
+    opacity: 0;
+    transition: opacity .2s;
+    &.ready { opacity: 1; }
   }
 
-  .controls {
-    position: relative;
-    margin: -1em 2.5em auto;
+  /* TOOLBAR ****************************************************************************************/
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5em 1.25em;
+    padding: .6em 1em;
+    color: var(--chrome-text);
+    background: var(--chrome);
+    box-shadow: 0 1px 3px #0003;
+    z-index: 3;
   }
 
-  #margin {
-    position: absolute;
-    top: 0;
-    translate: -50%;
+  .group {
+    display: flex;
+    align-items: center;
+    gap: .4em;
   }
 
-  [type=number] {
-    position: relative;
-    z-index: 2;
-    display: block;
+  .group > .label {
+    color: var(--chrome-muted);
+    font-size: .85em;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+
+  .field {
+    display: flex;
+    align-items: center;
+    gap: .25em;
+    font-size: .85em;
+    color: var(--chrome-muted);
+  }
+
+  input[type=number], select {
     font: inherit;
-    width: 4em;
-    margin: auto;
+    font-size: 14px;
     border: 0;
-    border-radius: .2em;
+    border-radius: .3em;
+    padding: .2em .3em;
+    color: var(--chrome-text);
+    background: var(--chrome-dark);
+    &:focus { outline: 2px solid hsl(28, 1%, 50%); }
+  }
+
+  input[type=number] {
+    width: 3.6em;
     text-align: center;
-    color: hsl(38, 2%, 43%);
-    background: hsl(18, 4%, 19%);
-    pointer-events: all;
-    /* Remove number spinners */
     -moz-appearance: textfield;
     &::-webkit-outer-spin-button,
     &::-webkit-inner-spin-button { margin: 0; -webkit-appearance: none; }
-    &:focus { outline: 2px solid hsl(28, 1%, 45%); }
-  }
-
-  .buttons {
-    display: flex;
-    gap: 1em;
   }
 
   button {
     border: none;
     border-radius: 1em;
     font: inherit;
-    font-size: 1rem;
-    padding: 0 .7em;
-    color: hsl(22, 5%, 24%);
-    background: hsl(38, 1%, 45%);
+    padding: .25em .8em;
+    color: var(--button-text);
+    background: var(--button);
     cursor: pointer;
-    pointer-events: all;
     appearance: none;
+    white-space: nowrap;
+    &.active { background: var(--button-active); }
+    &:hover { filter: brightness(1.08); }
   }
 
-  button.active {
-    background: hsl(18, 2%, 56%);
-  }
+  .spacer { margin-left: auto; }
 
   .toggle {
     position: relative;
     box-sizing: content-box;
-    width: 40px;
-    height: 20px;
+    width: 32px;
+    height: 16px;
     margin: 0;
-    margin-right: auto;
-    border: 4px solid hsl(18, 2%, 42%);
-    border-radius: 24px;
+    border: 3px solid hsl(18, 2%, 42%);
+    border-radius: 20px;
     background: hsl(28, 3%, 14%);
     box-shadow: 0 0 0 2px #0003 inset;
     transition: background-color .1s;
-    will-change: background-color;
     appearance: none;
     cursor: pointer;
-    pointer-events: all;
 
-    &:checked {
-      background: hsl(0, 59%, 27%);
-    }
+    &:checked { background: hsl(0, 59%, 27%); }
 
     &:after {
       content: '';
       position: absolute;
       top: 2px;
       left: 2px;
-      width: 16px;
-      height: 16px;
+      width: 12px;
+      height: 12px;
       border-radius: 10px;
       background: hsl(28, 1%, 48%);
       transition: left .1s, background-color .1s;
-      will-change: left, background-color;
-      pointer-events: none;
     }
 
     &:checked:after {
-      left: calc(100% - 16px - 2px);
+      left: calc(100% - 12px - 2px);
       background: hsl(360, 100%, 40%);
     }
   }
 
+  /* DESK *******************************************************************************************/
+
+  .desk {
+    flex: 1;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .column {
+    position: relative;
+    margin: 0 auto;
+    padding: 0 1em 3em;
+    width: max-content;
+  }
+
+  /* RULER — margin stops and tab stops, in typewriter columns from the paper's left edge */
+
+  .ruler-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: .6em 0 .5em;
+    background: linear-gradient(var(--desk) 80%, transparent);
+  }
+
+  .ruler {
+    position: relative;
+    height: 30px;
+    border-radius: 3px;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: copy;
+    canvas { display: block; width: 100%; height: 100%; border-radius: 3px; }
+  }
+
+  .stop {
+    position: absolute;
+    bottom: -7px;
+    width: 14px;
+    height: 14px;
+    translate: -50%;
+    cursor: ew-resize;
+    &::before { content: ''; position: absolute; inset: 0; }
+  }
+
+  .stop.margin::before {
+    background: hsl(0, 70%, 45%);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+
+  .stop.tab::before {
+    inset: 2px 3px 3px 3px;
+    border: solid hsl(18, 4%, 19%);
+    border-width: 0 0 3px 3px;
+  }
+
+  .stop.removing { opacity: .3; }
+
+  /* PAGES */
+
+  .pages {
+    position: relative;
+    display: flex;
+    flex-flow: column;
+    gap: 2em;
+  }
+
+  .page {
+    position: relative;
+    background: white;
+    box-shadow: 0 .5px 1px #0002, 0 4px 14px #0001;
+    cursor: text;
+    touch-action: pan-x pan-y pinch-zoom;
+    canvas { display: block; width: 100%; height: 100%; }
+    &::after {
+      content: attr(data-page);
+      position: absolute;
+      top: 100%;
+      right: 0;
+      padding-top: .4em;
+      font-size: .8em;
+      color: hsl(30, 5%, 55%);
+    }
+  }
+
+  .guide {
+    position: absolute;
+    border: 1px dashed var(--guide);
+    pointer-events: none;
+    body:not(.guides) & { display: none; }
+  }
+
+  .selection {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    div { position: absolute; background: var(--selection); }
+  }
+
+  .caret {
+    position: absolute;
+    width: 2px;
+    background: var(--caret);
+    pointer-events: none;
+    scroll-margin: 70px 40px 40px;
+    animation: blink 1.1s steps(1) infinite;
+    body:not(.focused) & { opacity: 0; animation: none; }
+  }
+
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* The real input lives here, invisible, parked at the caret so IMEs and mobile keyboards behave */
+  .input {
+    position: absolute;
+    width: 1px;
+    padding: 0;
+    border: 0;
+    margin: 0;
+    font-size: 16px; /* stops iOS from zooming on focus */
+    line-height: 1;
+    opacity: 0;
+    resize: none;
+    overflow: hidden;
+    white-space: pre;
+    caret-color: transparent;
+    pointer-events: none;
+    outline: none;
+  }
+
+  /* STATUS *****************************************************************************************/
+
+  footer {
+    display: flex;
+    gap: 1.25em;
+    align-items: center;
+    padding: .35em 1em;
+    font-size: .85em;
+    font-variant-numeric: tabular-nums;
+    color: var(--chrome-muted);
+    background: var(--chrome);
+    z-index: 3;
+    > * { white-space: nowrap; }
+    .hint { margin-left: auto; opacity: .8; overflow: hidden; text-overflow: ellipsis; }
+  }
+
+  /* PRINT — each page is a pre-rendered image sized to the physical sheet */
+
+  .print { display: none; }
+
+  @media print {
+    body { display: block; background: none; }
+    header, footer, .desk { display: none !important; }
+    .print { display: block; }
+    .print img { display: block; break-after: page; }
+  }
+
+  @media (max-width: 700px) {
+    header { gap: .5em .8em; padding: .5em .6em; }
+    footer { flex-wrap: wrap; gap: .2em 1em; }
+    footer .hint { display: none; }
+  }
 </style>
 
-<section>
-  <canvas class="text"></canvas>
-  <div class="ui">
-    <textarea autofocus></textarea>
-    <div class="overlay">
-      <canvas class="ruler"></canvas>
-      <div class="controls">
-        <input id="margin" type="number">
-        <input id="lineWidth" type="number">
-      </div>
-      <div class="buttons">
-        <button id="regular" class="active">Regular</button>
-        <button id="light">Light</button>
-        <button id="double">Double Struck</button>
-        <input type="checkbox" class="toggle" role="switch">
-        <button id="reset">Reset</button>
-        <button id="download">Save</button>
-      </div>
+<header>
+  <div class="group">
+    <span class="label">Paper</span>
+    <select id="paper"></select>
+    <button id="orientation" title="Rotate the sheet">Portrait</button>
+  </div>
+  <div class="group" id="customSize" hidden>
+    <label class="field">W <input id="customW" type="number" step="0.25" min="1" max="30"> in</label>
+    <label class="field">H <input id="customH" type="number" step="0.25" min="1" max="30"> in</label>
+  </div>
+  <div class="group">
+    <span class="label">Margins</span>
+    <label class="field" title="Left margin stop, in columns on the ruler">L <input id="left" type="number" min="0"></label>
+    <label class="field" title="Right margin stop, in columns on the ruler">R <input id="right" type="number" min="1"></label>
+    <label class="field" title="Top margin, in lines (6 per inch)">T <input id="top" type="number" min="0"></label>
+    <label class="field" title="Bottom margin, in lines (6 per inch)">B <input id="bottom" type="number" min="0"></label>
+  </div>
+  <div class="group">
+    <span class="label">Spacing</span>
+    <select id="spacing">
+      <option value="1">Single</option>
+      <option value="1.5">1½</option>
+      <option value="2">Double</option>
+      <option value="3">Triple</option>
+    </select>
+  </div>
+  <div class="group">
+    <span class="label">Tabs</span>
+    <button id="clearTabs" title="Clear all tab stops (defaults to every 5 columns)">Clear</button>
+  </div>
+  <div class="group">
+    <button id="regular" class="active">Regular</button>
+    <button id="light">Light</button>
+    <button id="double">Double Struck</button>
+    <input type="checkbox" id="red" class="toggle" role="switch" title="Red ribbon">
+  </div>
+  <div class="group spacer">
+    <button id="reset">Reset</button>
+    <button id="download" title="Save each page as a PNG">Save</button>
+    <button id="print" title="Print at the exact sheet size">Print</button>
+  </div>
+</header>
+
+<main class="desk">
+  <div class="column">
+    <div class="ruler-wrap">
+      <div class="ruler"><canvas></canvas></div>
+    </div>
+    <div class="pages">
+      <div class="selection"></div>
+      <div class="caret"></div>
+      <textarea class="input" autofocus spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
     </div>
   </div>
-</section>
+</main>
+
+<footer>
+  <span id="status"></span>
+  <span id="sheet"></span>
+  <label class="field">Zoom
+    <select id="zoom">
+      <option value="fit">Fit</option>
+      <option value="0.75">75%</option>
+      <option value="1">100%</option>
+      <option value="1.25">125%</option>
+      <option value="1.5">150%</option>
+      <option value="2">200%</option>
+    </select>
+  </label>
+  <label class="field">Guides <input type="checkbox" id="guides"></label>
+  <span class="hint" title="Tab jumps to the next stop · ⌘/Ctrl+Enter feeds a new sheet · Click the ruler to set a tab stop, drag it off to clear it">Tab → next stop · ⌘/Ctrl+Enter → new sheet · Click ruler → set tab</span>
+</footer>
+
+<div class="print"></div>
 
 <script type="text/coffeescript" src="index.coffee"></script>
 <script src="coffeescript.js"></script>
