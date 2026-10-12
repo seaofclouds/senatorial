@@ -785,11 +785,12 @@ reparse = ()-> doc = parseMarkdown input.value
 # Where the caret sits in the Markdown when it's before printed character k. At the edge of a span, the caret stays
 # outside it — so typing after an underlined word isn't underlined, the way it would be on the machine — but inside
 # the centring arrows, and never between a backslash and the character it escapes.
-rawAt = (k)->
-  r = doc.rawOf[clamp k, 0, doc.text.length]
-  r++ while r < doc.kinds.length and doc.kinds[r] in ["close", "blockOpen"]
-  r-- while r > 0 and doc.kinds[r - 1] in ["open", "blockClose", "escape"]
+rawAtIn = (d, k)->
+  r = d.rawOf[clamp k, 0, d.text.length]
+  r++ while r < d.kinds.length and d.kinds[r] in ["close", "blockOpen"]
+  r-- while r > 0 and d.kinds[r - 1] in ["open", "blockClose", "escape"]
   r
+rawAt = (k)-> rawAtIn doc, k
 visAt = (r)-> doc.visBefore[clamp r, 0, doc.raw.length]
 
 # The selection, in printed characters
@@ -885,12 +886,30 @@ input.addEventListener "beforeinput", (e)->
   else if t.startsWith "delete"
     e.preventDefault()
     deleteFor t
-  else if t is "insertFromPaste" and a < b
-    # Clear the selection the careful way first, then let the paste (which may be Markdown) land
-    e.preventDefault()
-    pasted = e.dataTransfer?.getData("text/plain") ? ""
-    edit a, b, "", ""
-    replaceRaw input.selectionStart, input.selectionStart, pasted
+
+# Pasting over a selection replaces it in one step, so one undo takes it back. Plain text takes on the style of what
+# it replaces, like typing over it; pasted Markdown keeps its own. (The paste event is the one that reliably carries
+# the clipboard's text.)
+input.addEventListener "paste", (e)->
+  [a, b] = selected()
+  return unless a < b
+  pasted = e.clipboardData?.getData("text/plain") ? ""
+  e.preventDefault()
+  return typeText pasted if parseMarkdown(pasted).text.length is pasted.length
+  {text, styles} = doc
+  start = paragraphStart text, a
+  end = paragraphEnd text, b
+  newEnd = end - (b - a)
+  codes = (styles.slice(0, a) + styles.slice(b)).slice start, newEnd + (if end is text.length then 1 else 0)
+  md = serializeBlock (text.slice(0, a) + text.slice(b)).slice(start, newEnd), codes
+  at = rawAtIn parseMarkdown(md), a - start
+  rawStart = if start is 0 then 0 else doc.rawOf[start - 1] + 1
+  rawEnd = if end is text.length then doc.raw.length else doc.rawOf[end - 1] + 1
+  replaceRaw rawStart, rawEnd, md.slice(0, at) + pasted + md.slice(at)
+  caret = rawStart + at + pasted.length
+  input.setSelectionRange caret, caret
+  renderSelection()
+  followCaret()
 
 # Copy and cut write well-formed Markdown, even when the selection starts or ends inside a span
 copyMarkdown = (e)->
