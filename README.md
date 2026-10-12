@@ -33,6 +33,7 @@ on the page and take up no room on the grid — and typing them by hand works to
 | X'd out | `~~~text~~~` |
 | Centred line | `->text<-` |
 | Flush right line | `->text->` |
+| Heading — double struck & underlined | `# text` (any level, and it can be centred too: `-># text<-`) |
 
 Capitals are typed over the letters themselves, like shift lock. A backslash before a marker character prints it as is.
 

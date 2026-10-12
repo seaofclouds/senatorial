@@ -138,18 +138,20 @@ loadAtlases = ()->
 # STYLE ###########################################################################################
 
 # Every character on the page remembers how it was struck: regular, light, or double struck, on the black or red half
-# of the ribbon, underlined, struck through, or X'd out — and whether its paragraph is centred or flush right.
+# of the ribbon, underlined, struck through, or X'd out — and whether its paragraph is centred or flush right, or a heading.
 # Each character's style is packed into one character code, so a document's styles are a string alongside its text.
 weights = ["regular", "light", "double"]
 flags = ["red", "center", "underline", "strike", "xout", "right"]
 encodeStyle = (style)->
   v = Math.max 0, weights.indexOf style.weight
   v |= 4 << k for flag, k in flags when style[flag]
+  v |= (style.heading or 0) << 8 # 0 for body text, or the heading's level, 1 to 6
   String.fromCharCode 48 + v
 decodeStyle = (code)->
   v = code.charCodeAt(0) - 48
   style = weight: weights[v & 3] ? "regular"
   style[flag] = (v & (4 << k)) isnt 0 for flag, k in flags
+  style.heading = (v >> 8) & 7
   style
 styleAlign = (code)->
   style = decodeStyle code
@@ -174,6 +176,7 @@ alignAt = (text, codes, i)-> styleAlign codes[paragraphStart text, i] ? encodeSt
 # The text behind the page is Markdown. Its markers are invisible on the page and take up no room on the grid:
 #   **double struck**   `light`   _underlined_ (or *underlined*)   ==red ribbon==
 #   ~~struck through~~   ~~~X'd out~~~   and a whole line wrapped in -> and <- is centred, or in -> and -> flush right
+#   # A heading (any level) is double struck & underlined, the way a typist would set one off
 # A backslash makes the next marker character print as itself.
 
 delimiters = # marker character → length of the run → what it does
@@ -182,7 +185,7 @@ delimiters = # marker character → length of the run → what it does
   "`": {1: "light"}
   "=": {2: "red"}
   "~": {2: "strike", 3: "xout"}
-escapable = "*_`=~\\-<"
+escapable = "*_`=~\\-<#"
 wordChar = /[\p{L}\p{N}]/u
 blankChar = /\s/
 
@@ -202,6 +205,12 @@ parseLine = (line)->
     kinds[n - 2] = kinds[n - 1] = "blockClose"
     start = 2
     end = n - 2
+
+  heading = 0
+  if m = line.slice(start, end).match /^(#{1,6}) /
+    heading = m[1].length
+    kinds[x] = "blockOpen" for x in [start...start + heading + 1]
+    start += heading + 1
 
   # Find the runs of marker characters that could open or close a span
   tokens = []
@@ -246,12 +255,13 @@ parseLine = (line)->
 
   # Each printed character takes on the style of every span it's in — the innermost wins for the strike
   styles = new Array n
-  styles[x] = Object.assign {weight: "regular"}, alignStyle align for x in [0...n] when kinds[x] is "text"
+  base = if heading then {weight: "double", underline: true, heading} else {weight: "regular"}
+  styles[x] = Object.assign {}, base, alignStyle align for x in [0...n] when kinds[x] is "text"
   spans.sort (a, b)-> (b.to - b.from) - (a.to - a.from)
   for span in spans
     for x in [span.from...span.to] when kinds[x] is "text"
       if span.type in weights then styles[x].weight = span.type else styles[x][span.type] = true
-  {kinds, styles, align}
+  {kinds, styles, align, heading}
 
 # Read a whole document: the printed text, a style for each printed character (plus one for the end),
 # where each printed character sits in the Markdown, and what every Markdown character is
@@ -277,12 +287,12 @@ parseMarkdown = (raw)->
     visBefore[b] = chars.length
     kinds.push "text"
     chars.push raw[b]
-    codes.push encodeStyle alignStyle line.align
+    codes.push encodeStyle Object.assign alignStyle(line.align), heading: line.heading
     rawOf.push b
     lineStart = b + 1
   visBefore[raw.length] = chars.length
   rawOf.push raw.length
-  codes.push encodeStyle alignStyle line.align # The end of the text carries the last line's alignment
+  codes.push encodeStyle Object.assign alignStyle(line.align), heading: line.heading # The end carries the last line's
   {raw, text: chars.join(""), styles: codes.join(""), rawOf, kinds, visBefore}
 
 # Spans open outermost-first in this order, so light text with an underline reads `_like this_`
@@ -316,21 +326,37 @@ trimSpans = (chars, styles)->
       i = j
   styles
 
-writeLine = (chars, styles, align, opts)->
+writeLine = (chars, styles, align, heading, opts)->
+  # Where each run of each kind of span ends, so the one that runs longest can go on the outside
+  runEnd = {}
+  for type in spanOrder
+    ends = new Array chars.length
+    for i in [chars.length - 1..0] by -1 when chars.length
+      ends[i] = if i + 1 < chars.length and hasSpan(styles[i + 1], type) then ends[i + 1] else i + 1
+    runEnd[type] = ends
+
   out = ""
   stack = []
   for c, i in chars
     want = (type for type in spanOrder when hasSpan styles[i], type)
-    # Close any span that's ending (and whatever's nested inside it), then open the ones that are starting
+    want = [] if opts.split and blankChar.test c # Last resort: no span crosses a space
+    # Close any span that's ending (and whatever's nested inside it), then open the ones that are starting,
+    # longest first, so a short span inside a long one never forces the long one to close and reopen
     k = stack.findIndex (type)-> type not in want
     if k >= 0
       out += markerFor type, opts for type in stack.slice(k).reverse()
       stack.length = k
-    for type in want when type not in stack
+    opening = (type for type in want when type not in stack)
+    opening.sort (x, y)-> (runEnd[y][i] - runEnd[x][i]) or (spanOrder.indexOf(x) - spanOrder.indexOf(y))
+    for type in opening
       out += markerFor type, opts
       stack.push type
     out += if opts.escape and c in escapable then "\\" + c else c
   out += markerFor type, opts for type in stack.slice().reverse()
+  if heading
+    out = "#".repeat(heading) + " " + out
+  else if /^#{1,6} /.test out
+    out = "\\" + out # Don't let it read as a heading
   if align is "center"
     "->#{out}<-"
   else if align is "right"
@@ -342,17 +368,28 @@ writeLine = (chars, styles, align, opts)->
 
 # Write one line of styled characters as Markdown, and check it reads back the same.
 # If it doesn't (say, a stray asterisk that would pair up), try escaping the marker characters.
-serializeLine = (chars, codes, align)->
+serializeLine = (chars, codes, align, heading)->
   styles = trimSpans chars, (decodeStyle c for c in codes)
-  want = (encodeStyle Object.assign s, alignStyle align for s in styles).join ""
+  # A heading is double struck & underlined by being a heading, so those don't need spans of their own
+  if heading
+    for s in styles
+      s.weight = "regular" if s.weight is "double"
+      s.underline = false
+  want = for s in styles
+    s = Object.assign {}, s, alignStyle(align), {heading}
+    Object.assign s, {weight: (if s.weight is "regular" then "double" else s.weight), underline: true} if heading
+    encodeStyle s
+  want = want.join ""
   attempts = [{underline: "_"}, {underline: "*"}, {underline: "_", escape: true}, {underline: "*", escape: true}]
   for opts in attempts
-    md = writeLine chars, styles, align, opts
+    md = writeLine chars, styles, align, heading, opts
     back = parseLine md
     printed = (md[x] for kind, x in back.kinds when kind is "text").join ""
     codesBack = (encodeStyle back.styles[x] for kind, x in back.kinds when kind is "text").join ""
-    return md if printed is chars.join("") and codesBack is want and back.align is align
-  md
+    return md if printed is chars.join("") and codesBack is want and back.align is align and back.heading is heading
+  # Nothing reads back exactly (styles that overlap in a way Markdown can't nest): keep the words and as much of the
+  # styling as Markdown allows, rather than let markers show up on the page
+  writeLine chars, styles, align, heading, {underline: "_", escape: true, split: true}
 
 # Write a run of whole paragraphs back into Markdown. codes has a style for each character — plus one more when the
 # run reaches the end of the document, for its last line.
@@ -362,7 +399,7 @@ serializeBlock = (text, codes)->
   loop
     j = i
     j++ while j < text.length and text[j] not in breaks
-    out += serializeLine Array.from(text.slice i, j), codes.slice(i, j), styleAlign codes[i]
+    out += serializeLine Array.from(text.slice i, j), codes.slice(i, j), styleAlign(codes[i]), decodeStyle(codes[i]).heading
     break if j is text.length
     out += text[j]
     i = j + 1
@@ -807,12 +844,13 @@ replaceRaw = (start, end, str)->
 
 # Replace printed characters [a, b) with ins (styled insCodes), then rewrite every paragraph it touched as Markdown,
 # so spans stay balanced however the text around them changes
-edit = (a, b, ins, insCodes, select, endAlign, follow = true)->
+# endPatch changes the style carried by the end of the document (its last line's alignment, or whether it's a heading).
+edit = (a, b, ins, insCodes, select, endPatch, follow = true)->
   {text, styles} = doc
   newText = text.slice(0, a) + ins + text.slice(b)
   newCodes = styles.slice(0, a) + insCodes + styles.slice(b)
-  if endAlign?
-    newCodes = newCodes.slice(0, -1) + encodeStyle Object.assign decodeStyle(newCodes.slice -1), alignStyle endAlign
+  if endPatch?
+    newCodes = newCodes.slice(0, -1) + encodeStyle Object.assign decodeStyle(newCodes.slice -1), endPatch
   start = paragraphStart text, a
   end = paragraphEnd text, b
   newEnd = end + ins.length - (b - a)
@@ -828,7 +866,15 @@ typeText = (str)->
   [a, b] = selected()
   style = if a < b then decodeStyle doc.styles[a] else {}
   Object.assign style, alignStyle alignAt doc.text, doc.styles, a
-  edit a, b, str, encodeStyle(style).repeat(str.length)
+  codes = encodeStyle(style).repeat(str.length)
+  # A new line after a heading is body text: the line break that will start it stops carrying the heading
+  if str[str.length - 1] in breaks
+    if b < doc.text.length and doc.text[b] in breaks
+      next = encodeStyle Object.assign decodeStyle(doc.styles[b]), heading: 0
+      return edit a, b + 1, str + doc.text[b], codes + next, [a + str.length, a + str.length]
+    else if b is doc.text.length
+      return edit a, b, str, codes, null, {heading: 0}
+  edit a, b, str, codes
 
 isBlank = (c)-> c? and blankChar.test(c) and c not in breaks
 
@@ -956,8 +1002,8 @@ setAlign = (align)->
   start = paragraphStart text, a
   end = paragraphEnd text, b
   codes = (encodeStyle Object.assign decodeStyle(c), alignStyle align for c in doc.styles.slice start, end).join ""
-  endAlign = if end is text.length then align else null
-  edit start, end, text.slice(start, end), codes, [anchor, focus], endAlign, false
+  endPatch = if end is text.length then alignStyle align else null
+  edit start, end, text.slice(start, end), codes, [anchor, focus], endPatch, false
 
 # A little menu that pops up over a selection, for striking it differently
 renderFormatMenu = ()->
