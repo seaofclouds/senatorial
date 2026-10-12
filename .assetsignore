@@ -4,4 +4,3 @@ node_modules
 wrangler.jsonc
 .assetsignore
 .wrangler
-package.json

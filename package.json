@@ -1,8 +1,0 @@
-{
-  "name": "senatorial",
-  "private": true,
-  "scripts": {
-    "build": "echo 'No build step — the page compiles index.coffee in the browser.'",
-    "deploy": "wrangler deploy"
-  }
-}
