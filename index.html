@@ -8,235 +8,70 @@
   [hidden] { display: none !important; }
 
   :root {
-    --chrome: hsl(30, 5%, 30%);
-    --chrome-dark: hsl(18, 4%, 19%);
-    --chrome-text: hsl(38, 8%, 78%);
-    --chrome-muted: hsl(38, 4%, 58%);
-    --button: hsl(38, 1%, 45%);
-    --button-active: hsl(18, 2%, 62%);
-    --button-text: hsl(22, 5%, 18%);
-    --desk: hsl(40 20% 90%);
+    --body: hsl(30, 5%, 30%);
+    --well: hsl(18, 4%, 19%);
+    --key: hsl(38, 1%, 45%);
+    --key-active: hsl(18, 2%, 56%);
+    --key-text: hsl(22, 5%, 24%);
+    --engraving: hsl(38, 2%, 43%);
     --caret: hsl(0, 80%, 45%);
-    --selection: hsla(210, 90%, 55%, .25);
-    --guide: hsla(210, 60%, 50%, .25);
   }
 
-  html, body { height: 100%; }
+  html { height: 100%; }
 
   body {
-    display: flex;
-    flex-flow: column;
+    display: grid;
+    place-items: end center;
+    min-height: 100%;
     margin: 0;
     font-family: system-ui;
-    font-size: 14px;
-    background: var(--desk);
+    background: hsl(40 20% 90%);
+  }
+
+  section {
+    position: relative;
+    width: 100%;
+    max-width: 72em;
+    padding: 1.5em .5em;
     opacity: 0;
-    transition: opacity .2s;
-    &.ready { opacity: 1; }
+    transition: opacity .3s;
+    body.ready & { opacity: 1; }
   }
 
-  /* TOOLBAR ****************************************************************************************/
-
-  header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: .5em 1.25em;
-    padding: .6em 1em;
-    color: var(--chrome-text);
-    background: var(--chrome);
-    box-shadow: 0 1px 3px #0003;
-    z-index: 3;
-  }
-
-  .group {
-    display: flex;
-    align-items: center;
-    gap: .4em;
-  }
-
-  .group > .label {
-    color: var(--chrome-muted);
-    font-size: .85em;
-    text-transform: uppercase;
-    letter-spacing: .05em;
-  }
-
-  .field {
-    display: flex;
-    align-items: center;
-    gap: .25em;
-    font-size: .85em;
-    color: var(--chrome-muted);
-  }
-
-  input[type=number], select {
-    font: inherit;
-    font-size: 14px;
-    border: 0;
-    border-radius: .3em;
-    padding: .2em .3em;
-    color: var(--chrome-text);
-    background: var(--chrome-dark);
-    &:focus { outline: 2px solid hsl(28, 1%, 50%); }
-  }
-
-  input[type=number] {
-    width: 3.6em;
-    text-align: center;
-    -moz-appearance: textfield;
-    &::-webkit-outer-spin-button,
-    &::-webkit-inner-spin-button { margin: 0; -webkit-appearance: none; }
-  }
-
-  button {
-    border: none;
-    border-radius: 1em;
-    font: inherit;
-    padding: .25em .8em;
-    color: var(--button-text);
-    background: var(--button);
-    cursor: pointer;
-    appearance: none;
-    white-space: nowrap;
-    &.active { background: var(--button-active); }
-    &:hover { filter: brightness(1.08); }
-  }
-
-  .spacer { margin-left: auto; }
-
-  .toggle {
-    position: relative;
-    box-sizing: content-box;
-    width: 32px;
-    height: 16px;
-    margin: 0;
-    border: 3px solid hsl(18, 2%, 42%);
-    border-radius: 20px;
-    background: hsl(28, 3%, 14%);
-    box-shadow: 0 0 0 2px #0003 inset;
-    transition: background-color .1s;
-    appearance: none;
-    cursor: pointer;
-
-    &:checked { background: hsl(0, 59%, 27%); }
-
-    &:after {
-      content: '';
-      position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 12px;
-      height: 12px;
-      border-radius: 10px;
-      background: hsl(28, 1%, 48%);
-      transition: left .1s, background-color .1s;
-    }
-
-    &:checked:after {
-      left: calc(100% - 12px - 2px);
-      background: hsl(360, 100%, 40%);
-    }
-  }
-
-  /* DESK *******************************************************************************************/
-
-  .desk {
-    flex: 1;
-    overflow: auto;
-    overscroll-behavior: contain;
-  }
-
-  .column {
-    position: relative;
-    margin: 0 auto;
-    padding: 0 1em 3em;
-    width: max-content;
-  }
-
-  /* RULER — margin stops and tab stops, in typewriter columns from the paper's left edge */
-
-  .ruler-wrap {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    padding: .6em 0 .5em;
-    background: linear-gradient(var(--desk) 80%, transparent);
-  }
-
-  .ruler {
-    position: relative;
-    height: 30px;
-    border-radius: 3px;
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    cursor: copy;
-    canvas { display: block; width: 100%; height: 100%; border-radius: 3px; }
-  }
-
-  .stop {
-    position: absolute;
-    bottom: -7px;
-    width: 14px;
-    height: 14px;
-    translate: -50%;
-    cursor: ew-resize;
-    &::before { content: ''; position: absolute; inset: 0; }
-  }
-
-  .stop.margin::before {
-    background: hsl(0, 70%, 45%);
-    clip-path: polygon(50% 0, 100% 100%, 0 100%);
-  }
-
-  .stop.tab::before {
-    inset: 2px 3px 3px 3px;
-    border: solid hsl(18, 4%, 19%);
-    border-width: 0 0 3px 3px;
-  }
-
-  .stop.removing { opacity: .3; }
-
-  /* PAGES */
+  /* PAPER ******************************************************************************************/
 
   .pages {
     position: relative;
     display: flex;
     flex-flow: column;
-    gap: 2em;
+    align-items: center;
+    gap: 1.5em;
+    padding-bottom: 1.5em;
   }
 
   .page {
     position: relative;
     background: white;
-    box-shadow: 0 .5px 1px #0002, 0 4px 14px #0001;
+    box-shadow: 0 .5px 1px #0001;
     cursor: text;
-    touch-action: pan-x pan-y pinch-zoom;
     canvas { display: block; width: 100%; height: 100%; }
-    &::after {
-      content: attr(data-page);
-      position: absolute;
-      top: 100%;
-      right: 0;
-      padding-top: .4em;
-      font-size: .8em;
-      color: hsl(30, 5%, 55%);
-    }
   }
 
+  /* Margin guides only appear while you're setting the stops */
   .guide {
     position: absolute;
-    border: 1px dashed var(--guide);
+    border: 1px dashed hsla(0, 70%, 45%, .3);
     pointer-events: none;
-    body:not(.guides) & { display: none; }
+    opacity: 0;
+    transition: opacity .2s;
+    body.guides & { opacity: 1; }
   }
 
   .selection {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    div { position: absolute; background: var(--selection); }
+    div { position: absolute; background: hsla(30, 5%, 30%, .18); }
   }
 
   .caret {
@@ -244,7 +79,7 @@
     width: 2px;
     background: var(--caret);
     pointer-events: none;
-    scroll-margin: 70px 40px 40px;
+    scroll-margin: 2em 0 10em;
     animation: blink 1.1s steps(1) infinite;
     body:not(.focused) & { opacity: 0; animation: none; }
   }
@@ -259,7 +94,6 @@
     border: 0;
     margin: 0;
     font-size: 16px; /* stops iOS from zooming on focus */
-    line-height: 1;
     opacity: 0;
     resize: none;
     overflow: hidden;
@@ -269,20 +103,194 @@
     outline: none;
   }
 
-  /* STATUS *****************************************************************************************/
+  /* MACHINE ****************************************************************************************/
 
-  footer {
+  .ui {
+    position: sticky;
+    bottom: 2em;
+    z-index: 1;
     display: flex;
-    gap: 1.25em;
-    align-items: center;
-    padding: .35em 1em;
-    font-size: .85em;
+    flex-flow: column;
+    gap: 1.6em;
+    padding: 0 1.5em 1.5em;
+    border-radius: 1em;
+    background: var(--body);
+  }
+
+  .scale {
+    position: relative;
+    margin: 0 auto;
+    height: 40px;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: copy;
+    canvas { display: block; width: 100%; height: 100%; }
+  }
+
+  /* Margin stops: dark pills engraved with their setting, like the old number boxes */
+  .pill {
+    position: absolute;
+    top: calc(100% - .5em);
+    translate: -50%;
+    min-width: 2.2em;
+    padding: 0 .35em;
+    border-radius: .2em;
+    font-size: 1rem;
+    line-height: 1.4;
+    text-align: center;
     font-variant-numeric: tabular-nums;
-    color: var(--chrome-muted);
-    background: var(--chrome);
-    z-index: 3;
-    > * { white-space: nowrap; }
-    .hint { margin-left: auto; opacity: .8; overflow: hidden; text-overflow: ellipsis; }
+    color: var(--engraving);
+    background: var(--well);
+    cursor: ew-resize;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    &:hover, &.dragging { color: hsl(38, 4%, 62%); }
+  }
+
+  /* Top & bottom margin stops ride along the left edge of each sheet */
+  .vstop.pill {
+    top: auto;
+    right: 100%;
+    margin-right: .5em;
+    translate: 0 -50%;
+    cursor: ns-resize;
+    opacity: .4;
+    transition: opacity .2s;
+    .page:hover &, body.guides & { opacity: 1; }
+  }
+
+  .tab {
+    position: absolute;
+    top: 0;
+    width: 12px;
+    height: 22px;
+    translate: -50%;
+    cursor: ew-resize;
+    &::before {
+      content: '';
+      position: absolute;
+      inset: 0 4px 6px;
+      border-radius: 0 0 3px 3px;
+      background: var(--well);
+    }
+    &.removing { opacity: .3; }
+  }
+
+  /* Shows where the next letter will strike, like the carriage pointer */
+  .pointer {
+    position: absolute;
+    top: 0;
+    width: 2px;
+    height: 100%;
+    translate: -1px;
+    background: hsl(0, 70%, 45%);
+    border-radius: 0 0 2px 2px;
+    pointer-events: none;
+  }
+
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1em;
+  }
+
+  .spacer { margin-right: auto !important; }
+
+  button {
+    border: none;
+    border-radius: 1em;
+    font: inherit;
+    font-size: 1rem;
+    line-height: 1.5;
+    padding: 0 .7em;
+    color: var(--key-text);
+    background: var(--key);
+    cursor: pointer;
+    appearance: none;
+    white-space: nowrap;
+  }
+
+  button.active {
+    background: var(--key-active);
+  }
+
+  .toggle {
+    position: relative;
+    box-sizing: content-box;
+    width: 40px;
+    height: 20px;
+    margin: 0;
+    border: 4px solid hsl(18, 2%, 42%);
+    border-radius: 24px;
+    background: hsl(28, 3%, 14%);
+    box-shadow: 0 0 0 2px #0003 inset;
+    transition: background-color .1s;
+    will-change: background-color;
+    appearance: none;
+    cursor: pointer;
+
+    &:checked {
+      background: hsl(0, 59%, 27%);
+    }
+
+    &:after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 10px;
+      background: hsl(28, 1%, 48%);
+      transition: left .1s, background-color .1s;
+      will-change: left, background-color;
+      pointer-events: none;
+    }
+
+    &:checked:after {
+      left: calc(100% - 16px - 2px);
+      background: hsl(360, 100%, 40%);
+    }
+  }
+
+  /* Paper tray — pops up out of the machine */
+  .tray {
+    position: absolute;
+    bottom: calc(100% + .75em);
+    right: 0;
+    display: flex;
+    flex-flow: column;
+    gap: .75em;
+    width: min(27em, 100%);
+    padding: 1em;
+    border-radius: 1em;
+    background: var(--body);
+    box-shadow: 0 6px 20px #0003;
+    .keys { display: flex; flex-wrap: wrap; gap: .5em; }
+  }
+
+  .size {
+    display: flex;
+    align-items: center;
+    gap: .5em;
+    color: var(--engraving);
+  }
+
+  [type=number] {
+    font: inherit;
+    width: 4em;
+    border: 0;
+    border-radius: .2em;
+    text-align: center;
+    color: var(--engraving);
+    background: var(--well);
+    -moz-appearance: textfield;
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button { margin: 0; -webkit-appearance: none; }
+    &:focus { outline: 2px solid hsl(28, 1%, 45%); }
   }
 
   /* PRINT — each page is a pre-rendered image sized to the physical sheet */
@@ -291,90 +299,48 @@
 
   @media print {
     body { display: block; background: none; }
-    header, footer, .desk { display: none !important; }
+    section { display: none; }
     .print { display: block; }
     .print img { display: block; break-after: page; }
   }
 
   @media (max-width: 700px) {
-    header { gap: .5em .8em; padding: .5em .6em; }
-    footer { flex-wrap: wrap; gap: .2em 1em; }
-    footer .hint { display: none; }
+    .ui { bottom: .5em; padding: 0 .75em .75em; gap: 1.4em; }
+    .buttons { gap: .5em; }
+    .vstop.pill { margin-right: .1em; font-size: .8rem; min-width: 1.8em; }
   }
 </style>
 
-<header>
-  <div class="group">
-    <span class="label">Paper</span>
-    <select id="paper"></select>
-    <button id="orientation" title="Rotate the sheet">Portrait</button>
+<section>
+  <div class="pages">
+    <div class="selection"></div>
+    <div class="caret"></div>
+    <textarea class="input" autofocus spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
   </div>
-  <div class="group" id="customSize" hidden>
-    <label class="field">W <input id="customW" type="number" step="0.25" min="1" max="30"> in</label>
-    <label class="field">H <input id="customH" type="number" step="0.25" min="1" max="30"> in</label>
-  </div>
-  <div class="group">
-    <span class="label">Margins</span>
-    <label class="field" title="Left margin stop, in columns on the ruler">L <input id="left" type="number" min="0"></label>
-    <label class="field" title="Right margin stop, in columns on the ruler">R <input id="right" type="number" min="1"></label>
-    <label class="field" title="Top margin, in lines (6 per inch)">T <input id="top" type="number" min="0"></label>
-    <label class="field" title="Bottom margin, in lines (6 per inch)">B <input id="bottom" type="number" min="0"></label>
-  </div>
-  <div class="group">
-    <span class="label">Spacing</span>
-    <select id="spacing">
-      <option value="1">Single</option>
-      <option value="1.5">1½</option>
-      <option value="2">Double</option>
-      <option value="3">Triple</option>
-    </select>
-  </div>
-  <div class="group">
-    <span class="label">Tabs</span>
-    <button id="clearTabs" title="Clear all tab stops (defaults to every 5 columns)">Clear</button>
-  </div>
-  <div class="group">
-    <button id="regular" class="active">Regular</button>
-    <button id="light">Light</button>
-    <button id="double">Double Struck</button>
-    <input type="checkbox" id="red" class="toggle" role="switch" title="Red ribbon">
-  </div>
-  <div class="group spacer">
-    <button id="reset">Reset</button>
-    <button id="download" title="Save each page as a PNG">Save</button>
-    <button id="print" title="Print at the exact sheet size">Print</button>
-  </div>
-</header>
-
-<main class="desk">
-  <div class="column">
-    <div class="ruler-wrap">
-      <div class="ruler"><canvas></canvas></div>
+  <div class="ui">
+    <div class="scale"><canvas></canvas><div class="pointer"></div></div>
+    <div class="buttons">
+      <button id="regular" class="active">Regular</button>
+      <button id="light">Light</button>
+      <button id="double">Double Struck</button>
+      <input type="checkbox" id="red" class="toggle spacer" role="switch" title="Red ribbon">
+      <button id="paper" title="Paper">Letter</button>
+      <button id="spacing" title="Line spacing">Single</button>
+      <button id="clearTabs" title="Clear all tab stops">Tab Clear</button>
+      <button id="reset">Reset</button>
+      <button id="download">Save</button>
+      <button id="print">Print</button>
     </div>
-    <div class="pages">
-      <div class="selection"></div>
-      <div class="caret"></div>
-      <textarea class="input" autofocus spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
+    <div class="tray" hidden>
+      <div class="keys" id="papers"></div>
+      <div class="keys">
+        <button id="portrait">Portrait</button>
+        <button id="landscape">Landscape</button>
+      </div>
+      <label class="size" id="customSize"><input id="customW" type="number" step="0.25" min="1" max="30"> × <input id="customH" type="number" step="0.25" min="1" max="30"> inches</label>
     </div>
   </div>
-</main>
-
-<footer>
-  <span id="status"></span>
-  <span id="sheet"></span>
-  <label class="field">Zoom
-    <select id="zoom">
-      <option value="fit">Fit</option>
-      <option value="0.75">75%</option>
-      <option value="1">100%</option>
-      <option value="1.25">125%</option>
-      <option value="1.5">150%</option>
-      <option value="2">200%</option>
-    </select>
-  </label>
-  <label class="field">Guides <input type="checkbox" id="guides"></label>
-  <span class="hint" title="Tab jumps to the next stop · ⌘/Ctrl+Enter feeds a new sheet · Click the ruler to set a tab stop, drag it off to clear it">Tab → next stop · ⌘/Ctrl+Enter → new sheet · Click ruler → set tab</span>
-</footer>
+</section>
 
 <div class="print"></div>
 

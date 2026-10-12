@@ -13,17 +13,17 @@ mm = (v)-> v / 25.4
 
 # Sizes are in inches, portrait (or the way the sheet is usually fed, for cards)
 papers =
-  letter: name: "US Letter — 8½ × 11", w: 8.5, h: 11
-  legal: name: "US Legal — 8½ × 14", w: 8.5, h: 14
-  halfLetter: name: "Half Letter — 5½ × 8½", w: 5.5, h: 8.5
-  executive: name: "Executive — 7¼ × 10½", w: 7.25, h: 10.5
-  a4: name: "A4 — 210 × 297 mm", w: mm(210), h: mm(297)
-  a5: name: "A5 — 148 × 210 mm", w: mm(148), h: mm(210)
-  a6: name: "A6 — 105 × 148 mm", w: mm(105), h: mm(148)
-  card3x5: name: "Index Card — 5 × 3", w: 5, h: 3
-  card4x6: name: "Index Card — 6 × 4", w: 6, h: 4
-  card5x8: name: "Index Card — 8 × 5", w: 8, h: 5
-  custom: name: "Custom…"
+  letter: short: "Letter", name: "US Letter — 8½ × 11", w: 8.5, h: 11
+  legal: short: "Legal", name: "US Legal — 8½ × 14", w: 8.5, h: 14
+  halfLetter: short: "Half Letter", name: "Half Letter — 5½ × 8½", w: 5.5, h: 8.5
+  executive: short: "Executive", name: "Executive — 7¼ × 10½", w: 7.25, h: 10.5
+  a4: short: "A4", name: "A4 — 210 × 297 mm", w: mm(210), h: mm(297)
+  a5: short: "A5", name: "A5 — 148 × 210 mm", w: mm(148), h: mm(210)
+  a6: short: "A6", name: "A6 — 105 × 148 mm", w: mm(105), h: mm(148)
+  card3x5: short: "3×5 Card", name: "Index Card — 5 × 3", w: 5, h: 3
+  card4x6: short: "4×6 Card", name: "Index Card — 6 × 4", w: 6, h: 4
+  card5x8: short: "5×8 Card", name: "Index Card — 8 × 5", w: 8, h: 5
+  custom: short: "Custom", name: "Custom…"
 
 defaults =
   paper: "letter"
@@ -38,8 +38,6 @@ defaults =
   tabs: [] # tab stops, in columns from the left edge of the paper. When empty, there's a stop every 5 columns.
   atlas: "regular"
   red: false
-  zoom: "fit"
-  guides: true
 
 defaultTabInterval = 5
 
@@ -233,20 +231,19 @@ indexAtPoint = (g, page, x, y)->
 
 $ = (q)-> document.querySelector q
 
-desk = $ ".desk"
-column = $ ".column"
+section = $ "section"
 pagesElm = $ ".pages"
 selectionElm = $ ".selection"
 caretElm = $ ".caret"
 input = $ ".input"
-rulerElm = $ ".ruler"
-rulerCanvas = $ ".ruler canvas"
-rulerCtx = rulerCanvas.getContext "2d"
+scaleElm = $ ".scale"
+scaleCanvas = $ ".scale canvas"
+scaleCtx = scaleCanvas.getContext "2d"
+pointerElm = $ ".pointer"
 
 pageViews = []
 renderVersion = 0
 geo = null
-zoom = 1
 pxPerInch = cssDPI
 
 # Settings changed or the atlas loaded, so every page needs to be redrawn
@@ -254,10 +251,13 @@ invalidate = ()->
   renderVersion++
   render()
 
+# Every sheet is shown at the same scale — a letter-width sheet fills the machine,
+# and smaller sheets (like index cards) look smaller, just like they would in the carriage
+widestUsualSheet = 8.5
 currentZoom = (g)->
-  return +settings.zoom unless settings.zoom is "fit"
-  available = desk.clientWidth - 32
-  clamp available / (g.w * cssDPI), .25, 2
+  gutter = if window.innerWidth < 700 then 40 else 128
+  available = section.clientWidth - gutter
+  available / (Math.max(g.w, widestUsualSheet) * cssDPI)
 
 makePageView = ()->
   elm = document.createElement "div"
@@ -265,16 +265,21 @@ makePageView = ()->
   canvas = document.createElement "canvas"
   guide = document.createElement "div"
   guide.className = "guide"
-  elm.append canvas, guide
+  top = document.createElement "div"
+  top.className = "pill vstop"
+  top.dataset.kind = "top"
+  bottom = document.createElement "div"
+  bottom.className = "pill vstop"
+  bottom.dataset.kind = "bottom"
+  elm.append canvas, guide, top, bottom
   pagesElm.insertBefore elm, selectionElm
-  {elm, canvas, guide, ctx: canvas.getContext("2d"), key: null}
+  {elm, canvas, guide, top, bottom, ctx: canvas.getContext("2d"), key: null}
 
 render = ()->
   return unless settings?
   geo = g = geometry()
   doLayout g
-  zoom = currentZoom g
-  pxPerInch = cssDPI * zoom
+  pxPerInch = cssDPI * currentZoom g
   cssW = g.w * pxPerInch
   cssH = g.h * pxPerInch
   dpr = window.devicePixelRatio or 1
@@ -282,8 +287,9 @@ render = ()->
   pageViews.push makePageView() while pageViews.length < layout.pages.length
   pageViews.pop().elm.remove() while pageViews.length > layout.pages.length
 
+  textBottom = lineTop(g, g.linesPerPage - 1) + 1 / linesPerInch
+
   for view, p in pageViews
-    view.elm.dataset.page = "#{p + 1}"
     view.elm.style.width = cssW + "px"
     view.elm.style.height = cssH + "px"
     pw = Math.round cssW * dpr
@@ -297,7 +303,14 @@ render = ()->
       left: g.left / charactersPerInch * pxPerInch + "px"
       width: (g.right - g.left) / charactersPerInch * pxPerInch + "px"
       top: g.top / linesPerInch * pxPerInch + "px"
-      height: ((g.linesPerPage - 1) * g.spacing + 1) / linesPerInch * pxPerInch + "px"
+      height: (textBottom - g.top / linesPerInch) * pxPerInch + "px"
+
+    view.top.style.top = g.top / linesPerInch * pxPerInch + "px"
+    view.top.textContent = g.top
+    view.top.title = "Top margin: #{g.top} lines (#{fmt g.top / linesPerInch} in)"
+    view.bottom.style.top = (g.h - g.bottom / linesPerInch) * pxPerInch + "px"
+    view.bottom.textContent = g.bottom
+    view.bottom.title = "Bottom margin: #{g.bottom} lines (#{fmt g.bottom / linesPerInch} in) · #{g.linesPerPage} lines per page"
 
     # Only redraw pages whose contents actually changed
     {start, end} = layout.pages[p]
@@ -306,9 +319,8 @@ render = ()->
       view.key = key
       drawPage view.ctx, p, pw / g.w
 
-  drawRuler g, cssW
+  drawScale g, cssW
   renderSelection()
-  updateStatus()
 
 # Draw one page onto a canvas, at the given pixels per inch (screen, or exportDPI for saving)
 drawPage = (ctx, p, ppi)->
@@ -337,59 +349,56 @@ drawPage = (ctx, p, ppi)->
     ctx.drawImage atlasImg, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
   null
 
-# The ruler is laid out just like the typewriter's paper scale: one tick per column, numbered from the left edge of the sheet
-drawRuler = (g, cssW)->
+# The scale runs across the sheet, one tick per column, just like the typewriter's paper scale
+drawScale = (g, cssW)->
   dpr = window.devicePixelRatio or 1
-  cssH = rulerElm.offsetHeight
-  rulerElm.style.width = cssW + "px"
-  rulerCanvas.width = Math.round cssW * dpr
-  rulerCanvas.height = Math.round cssH * dpr
-  ctx = rulerCtx
+  cssH = scaleElm.offsetHeight
+  scaleElm.style.width = cssW + "px"
+  scaleCanvas.width = Math.round cssW * dpr
+  scaleCanvas.height = Math.round cssH * dpr
+  ctx = scaleCtx
   ctx.setTransform dpr, 0, 0, dpr, 0, 0
+  ctx.clearRect 0, 0, cssW, cssH
   step = cssW / (g.w * charactersPerInch)
 
-  ctx.fillStyle = "hsl(18, 4%, 24%)"
-  ctx.fillRect 0, 0, cssW, cssH
-  ctx.fillStyle = "hsl(30, 5%, 33%)"
-  ctx.fillRect g.left * step, 0, (g.right - g.left) * step, cssH
+  # The space between the margins is outlined, like the original scale
+  ctx.beginPath()
+  ctx.roundRect g.left * step, -6, (g.right - g.left) * step, cssH + 6, 5
+  ctx.strokeStyle = "hsl(18, 4%, 19%)"
+  ctx.lineWidth = 2
+  ctx.stroke()
 
-  ctx.font = "9px system-ui"
-  ctx.textAlign = "center"
-  ctx.textBaseline = "top"
-  labelEvery = if step * 10 >= 18 then 10 else 20
   for i in [0..g.cols]
-    inside = g.left <= i <= g.right
-    height = if i % 10 is 0 then 11 else if i % 5 is 0 then 7 else 4
-    continue if step < 3 and i % 5 isnt 0
-    ctx.fillStyle = if inside then "hsl(38, 6%, 72%)" else "hsl(38, 4%, 48%)"
-    ctx.fillRect Math.round(i * step) - .5, cssH - height, 1, height
-    if i % labelEvery is 0 and i > 0 and i < g.cols
-      ctx.fillText i, i * step, 3
+    continue if i is g.left or i is g.right
+    continue if step < 4 and i % 5 isnt 0
+    ctx.fillStyle =
+      if not (g.left < i < g.right) then "hsl(18, 4%, 25%)"
+      else if i % 10 is 0 then "hsl(18, 2%, 55%)"
+      else "hsl(18, 2%, 45%)"
+    height = if i % 10 is 0 then 17 else if i % 5 is 0 then 12 else 7
+    ctx.fillRect Math.round(i * step) - 1, 0, 2, height
 
-  # Default tab stops are shown as little dots
-  unless settings.tabs.length
-    ctx.fillStyle = "hsl(38, 6%, 62%)"
-    for c in defaultTabs g
-      ctx.beginPath()
-      ctx.arc c * step, cssH - 14, 1.5, 0, Math.PI * 2
-      ctx.fill()
-
-  # Sync the draggable stops
+  # Sync the draggable stops: two margin pills and a notch for each tab stop
   stops = [{kind: "left", col: g.left}, {kind: "right", col: g.right}]
   stops.push {kind: "tab", col, index} for col, index in settings.tabs
-  elms = Array.from rulerElm.querySelectorAll ".stop"
+  elms = Array.from scaleElm.querySelectorAll ".pill, .tab"
   while elms.length < stops.length
     elms.push e = document.createElement "div"
-    rulerElm.append e
+    scaleElm.append e
   e.remove() for e in elms.splice stops.length
   for stop, k in stops
     e = elms[k]
-    e.className = "stop " + (if stop.kind is "tab" then "tab" else "margin")
-    e.classList.add "removing" if drag?.kind is "tab" and drag.index is stop.index and drag.removing
+    e.className = if stop.kind is "tab" then "tab" else "pill"
+    e.classList.toggle "removing", drag?.kind is "tab" and drag.index is stop.index and drag.removing
+    e.classList.toggle "dragging", drag?.kind is stop.kind
     e.dataset.kind = stop.kind
     e.dataset.index = stop.index ? ""
     e.style.left = stop.col * step + "px"
-    e.title = if stop.kind is "tab" then "Tab stop at #{stop.col}" else "#{stop.kind[0].toUpperCase() + stop.kind[1..]} margin at #{stop.col}"
+    e.textContent = if stop.kind is "tab" then "" else stop.col
+    e.title =
+      if stop.kind is "tab" then "Tab stop at #{stop.col} — drag it off the scale to clear it"
+      else if stop.kind is "left" then "Left margin at #{stop.col} (#{fmt stop.col / charactersPerInch} in)"
+      else "Right margin at #{stop.col} (#{fmt (g.cols - stop.col) / charactersPerInch} in from the edge) · #{g.right - g.left} characters per line"
   null
 
 # Caret position for index i, in CSS px relative to the .pages container
@@ -406,10 +415,13 @@ renderSelection = ()->
   b = input.selectionEnd
 
   # Caret goes on the moving end of the selection
-  focus = if input.selectionDirection is "backward" then a else b
-  c = caretPoint Math.min focus, layout.n
+  focus = Math.min (if input.selectionDirection is "backward" then a else b), layout.n
+  c = caretPoint focus
   Object.assign caretElm.style, left: c.x - 1 + "px", top: c.y + "px", height: c.h + "px"
   Object.assign input.style, left: c.x + "px", top: c.y + "px", height: c.h + "px"
+
+  # The pointer on the scale follows the carriage
+  pointerElm.style.left = layout.pos[focus][2] / charactersPerInch * pxPerInch + "px"
 
   # Restart the blink so the caret is visible while it's moving
   caretElm.style.animation = "none"
@@ -428,12 +440,6 @@ renderSelection = ()->
       x1 = if last + 1 <= ln.end then caretPoint(last + 1).x else caretPoint(last).x + pxPerInch / charactersPerInch
       rects.push "<div style='left:#{p0.x}px;top:#{p0.y}px;width:#{Math.max 2, x1 - p0.x}px;height:#{p0.h}px'></div>"
   selectionElm.innerHTML = rects.join ""
-
-updateStatus = ()->
-  i = Math.min (if input.selectionDirection is "backward" then input.selectionStart else input.selectionEnd), layout.n
-  [page, line, col] = layout.pos[i]
-  $("#status").textContent = "Page #{page + 1} of #{layout.pages.length} · Line #{line + 1} of #{geo.linesPerPage} · Column #{col}"
-  $("#sheet").textContent = "#{fmt geo.w} × #{fmt geo.h} in · #{geo.right - geo.left} characters × #{geo.linesPerPage} lines"
 
 fmt = (v)-> +v.toFixed 2
 
@@ -463,7 +469,6 @@ changeSettings = (changes)->
   loadAtlas() if changes.atlas? or changes.red?
   syncControls()
   invalidate()
-  renderSelection()
 
 # Keep the margins sane, whatever paper we're on
 normalize = ()->
@@ -475,71 +480,71 @@ normalize = ()->
   settings.customH = clamp +settings.customH or 11, 1, 30
   settings.tabs = (Array.from new Set settings.tabs.map Math.round).sort (a, b)-> a - b
 
+spacings = [1, 1.5, 2, 3]
+spacingNames = {1: "Single", 1.5: "1½ Space", 2: "Double", 3: "Triple"}
+
 controls = {}
-controls[id] = $ "#" + id for id in ["paper", "orientation", "customSize", "customW", "customH", "left", "right", "top", "bottom", "spacing", "zoom", "guides", "red"]
+controls[id] = $ "#" + id for id in ["paper", "spacing", "red", "portrait", "landscape", "customSize", "customW", "customH"]
 atlasBtns = {}
 atlasBtns[id] = $ "#" + id for id in ["regular", "light", "double"]
+tray = $ ".tray"
 
+paperBtns = {}
 for key, paper of papers
-  option = document.createElement "option"
-  option.value = key
-  option.textContent = paper.name
-  controls.paper.append option
+  do (key)->
+    btn = paperBtns[key] = document.createElement "button"
+    btn.textContent = paper.short
+    btn.title = paper.name
+    btn.onclick = ()-> changeSettings paper: key
+    $("#papers").append btn
 
 syncControls = ()->
-  g = geometry()
-  controls.paper.value = settings.paper
-  controls.customSize.hidden = settings.paper isnt "custom"
-  controls.orientation.textContent = if settings.landscape then "Landscape" else "Portrait"
-  sync = (elm, value)-> elm.value = value unless document.activeElement is elm
-  sync controls.customW, settings.customW
-  sync controls.customH, settings.customH
-  sync controls.left, g.left
-  sync controls.right, g.right
-  sync controls.top, g.top
-  sync controls.bottom, g.bottom
-  controls.left.max = g.right - 1
-  controls.right.max = g.cols
-  controls.left.parentElement.title = "Left margin stop: column #{g.left} (#{fmt g.left / charactersPerInch} in from the edge)"
-  controls.right.parentElement.title = "Right margin stop: column #{g.right} (#{fmt (g.cols - g.right) / charactersPerInch} in from the edge)"
-  controls.top.parentElement.title = "Top margin: #{g.top} lines (#{fmt g.top / linesPerInch} in)"
-  controls.bottom.parentElement.title = "Bottom margin: #{g.bottom} lines (#{fmt g.bottom / linesPerInch} in)"
-  controls.spacing.value = settings.spacing
-  controls.zoom.value = settings.zoom
-  controls.guides.checked = settings.guides
+  p = papers[settings.paper]
+  controls.paper.textContent = if settings.paper is "custom" then "#{fmt settings.customW} × #{fmt settings.customH}" else p.short
+  controls.paper.title = "Paper: #{p.name}#{if settings.landscape then ", landscape" else ""}"
+  controls.paper.classList.toggle "active", not tray.hidden
+  controls.spacing.textContent = spacingNames[settings.spacing] ? "#{settings.spacing}×"
   controls.red.checked = settings.red
-  document.body.classList.toggle "guides", settings.guides
+  controls.portrait.classList.toggle "active", not settings.landscape
+  controls.landscape.classList.toggle "active", settings.landscape
+  controls.customSize.hidden = settings.paper isnt "custom"
+  controls.customW.value = settings.customW unless document.activeElement is controls.customW
+  controls.customH.value = settings.customH unless document.activeElement is controls.customH
+  btn.classList.toggle "active", name is settings.paper for name, btn of paperBtns
   btn.classList.toggle "active", name is settings.atlas for name, btn of atlasBtns
   null
 
-numberInput = (elm, cb)->
-  elm.oninput = ()-> cb +elm.value unless elm.value is "" or isNaN +elm.value
-  elm.onchange = ()-> syncControls()
-
-controls.paper.onchange = ()-> changeSettings paper: controls.paper.value
-controls.orientation.onclick = ()-> changeSettings landscape: not settings.landscape
-numberInput controls.customW, (v)-> changeSettings customW: v
-numberInput controls.customH, (v)-> changeSettings customH: v
-numberInput controls.left, (v)-> changeSettings left: v
-numberInput controls.right, (v)-> changeSettings right: geometry().cols - v
-numberInput controls.top, (v)-> changeSettings top: v
-numberInput controls.bottom, (v)-> changeSettings bottom: v
-controls.spacing.onchange = ()-> changeSettings spacing: +controls.spacing.value
-controls.zoom.onchange = ()-> changeSettings zoom: controls.zoom.value
-controls.guides.onchange = ()-> changeSettings guides: controls.guides.checked
-controls.red.onchange = ()-> changeSettings red: controls.red.checked
 for name, btn of atlasBtns
   do (name)-> btn.onclick = ()-> changeSettings atlas: name
+controls.red.onchange = ()-> changeSettings red: controls.red.checked
+controls.spacing.onclick = ()->
+  next = spacings[(spacings.indexOf(settings.spacing) + 1) % spacings.length]
+  changeSettings spacing: next
 $("#clearTabs").onclick = ()-> changeSettings tabs: []
+controls.portrait.onclick = ()-> changeSettings landscape: false
+controls.landscape.onclick = ()-> changeSettings landscape: true
+for dim in ["customW", "customH"]
+  do (dim)->
+    elm = controls[dim]
+    elm.oninput = ()-> changeSettings "#{dim}": +elm.value unless elm.value is "" or isNaN +elm.value
+    elm.onchange = syncControls
 
-# Hand the keyboard back to the page after clicking a button or picking from a menu
-for elm in document.querySelectorAll "header button, header select, footer select, header .toggle, footer input"
-  do (elm)->
-    elm.addEventListener "change", ()-> input.focus preventScroll: true
-    elm.addEventListener "click", ()-> input.focus preventScroll: true if elm.tagName is "BUTTON"
+controls.paper.onclick = ()->
+  tray.hidden = not tray.hidden
+  syncControls()
+
+# Close the paper tray when you go back to typing
+document.addEventListener "pointerdown", (e)->
+  unless tray.hidden or e.target.closest(".tray") or e.target is controls.paper
+    tray.hidden = true
+    syncControls()
+
+# Hand the keyboard back to the page after pressing a key on the machine
+for elm in document.querySelectorAll ".buttons button, .tray button, .toggle"
+  elm.addEventListener "click", ()-> input.focus preventScroll: true
 
 $("#reset").onclick = ()->
-  return unless confirm "Clear the page and reset all settings?"
+  return unless confirm "Clear the page and reset the machine?"
   input.value = ""
   saveText()
   settings = structuredClone defaults
@@ -547,39 +552,48 @@ $("#reset").onclick = ()->
   loadAtlas()
   input.focus()
 
-# RULER INTERACTION ###############################################################################
+# STOPS ###########################################################################################
+
+# Margin & tab stops are set the way you would on the machine: drag the stops along the scale,
+# click the scale to set a tab, and pull a tab off the scale to clear it.
+# The top & bottom margin stops sit along the left edge of each sheet.
 
 drag = null
 
-rulerCol = (e)->
-  rect = rulerElm.getBoundingClientRect()
+showGuides = (show)-> document.body.classList.toggle "guides", show
+scaleElm.onpointerenter = ()-> showGuides true
+scaleElm.onpointerleave = ()-> showGuides drag?
+
+scaleCol = (e)->
+  rect = scaleElm.getBoundingClientRect()
   Math.round (e.clientX - rect.left) / rect.width * geo.w * charactersPerInch
 
-rulerElm.onpointerdown = (e)->
+scaleElm.onpointerdown = (e)->
   e.preventDefault()
-  col = rulerCol e
-  stop = e.target.closest ".stop"
+  col = scaleCol e
+  stop = e.target.closest ".pill, .tab"
   if stop?
     drag = kind: stop.dataset.kind, index: +stop.dataset.index
   else
-    # Clicking on an empty part of the ruler sets a new tab stop
+    # Clicking on an empty part of the scale sets a new tab stop
     return unless geo.left < col < geo.right
     tabs = settings.tabs.concat col
     changeSettings {tabs}
     drag = kind: "tab", index: settings.tabs.indexOf col
   drag.y = e.clientY
-  rulerElm.setPointerCapture e.pointerId
+  showGuides true
+  scaleElm.setPointerCapture e.pointerId
 
-rulerElm.onpointermove = (e)->
+scaleElm.onpointermove = (e)->
   return unless drag?
-  col = rulerCol e
+  col = scaleCol e
   switch drag.kind
     when "left"
       changeSettings left: clamp col, 0, geo.right - 1 unless col is geo.left
     when "right"
       changeSettings right: geo.cols - clamp col, geo.left + 1, geo.cols unless col is geo.right
     when "tab"
-      # Pull a tab stop off the ruler to clear it
+      # Pull a tab stop off the scale to clear it
       drag.removing = Math.abs(e.clientY - drag.y) > 30
       tabs = settings.tabs.slice()
       tabs[drag.index] = clamp col, geo.left + 1, geo.right - 1
@@ -587,14 +601,37 @@ rulerElm.onpointermove = (e)->
       save "settings", settings
       invalidate()
 
-rulerElm.onpointerup = rulerElm.onpointercancel = (e)->
+scaleElm.onpointerup = scaleElm.onpointercancel = (e)->
   return unless drag?
-  if drag.kind is "tab"
-    tabs = settings.tabs.slice()
-    tabs.splice drag.index, 1 if drag.removing
-    drag = null
-    changeSettings {tabs}
+  tabs = settings.tabs.slice()
+  tabs.splice drag.index, 1 if drag.kind is "tab" and drag.removing
   drag = null
+  changeSettings {tabs}
+  showGuides scaleElm.matches ":hover"
+
+# Top & bottom margin stops
+pagesElm.addEventListener "pointerdown", (e)->
+  stop = e.target.closest ".vstop"
+  return unless stop?
+  e.preventDefault()
+  e.stopPropagation()
+  drag = kind: stop.dataset.kind, page: stop.closest ".page"
+  stop.classList.add "dragging"
+  showGuides true
+  stop.setPointerCapture e.pointerId
+  stop.onpointermove = (e)->
+    rect = drag.page.getBoundingClientRect()
+    line = Math.round (e.clientY - rect.top) / pxPerInch * linesPerInch
+    if drag.kind is "top"
+      changeSettings top: clamp line, 0, geo.rows - geo.bottom - 1
+    else
+      changeSettings bottom: clamp geo.rows - line, 0, geo.rows - geo.top - 1
+  stop.onpointerup = stop.onpointercancel = ()->
+    stop.onpointermove = stop.onpointerup = stop.onpointercancel = null
+    stop.classList.remove "dragging"
+    drag = null
+    showGuides false
+, true
 
 # TYPING ##########################################################################################
 
@@ -611,7 +648,6 @@ setSelection = (anchor, focus)->
   else
     input.setSelectionRange anchor, focus, "forward"
   renderSelection()
-  updateStatus()
   scrollCaretIntoView()
 
 getAnchorFocus = ()->
@@ -678,8 +714,7 @@ input.addEventListener "keydown", (e)->
     # Let the textarea handle it, then catch up
     requestAnimationFrame ()->
       renderSelection()
-      updateStatus()
-
+    
 input.addEventListener "input", ()->
   saveText()
   render()
@@ -688,12 +723,10 @@ input.addEventListener "input", ()->
 for type in ["select", "selectionchange", "keyup"]
   input.addEventListener type, ()->
     renderSelection()
-    updateStatus()
-document.addEventListener "selectionchange", ()->
+  document.addEventListener "selectionchange", ()->
   if document.activeElement is input
     renderSelection()
-    updateStatus()
-
+  
 updateFocus = ()-> document.body.classList.toggle "focused", document.activeElement is input
 input.addEventListener "focus", updateFocus
 input.addEventListener "blur", updateFocus
@@ -826,3 +859,4 @@ input.focus preventScroll: true
 input.setSelectionRange layout.n, layout.n
 renderSelection()
 updateFocus()
+scrollCaretIntoView()
