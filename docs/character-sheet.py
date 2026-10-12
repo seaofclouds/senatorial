@@ -30,7 +30,7 @@ def atlasPos(c):
             return sx + 2 * x * gw, sy + 2 * y * gh - x * skew
     return None
 
-# Every character, roughly in the order you'd look for it. The arrows are a first guess, to be settled.
+# Every character, roughly in the order you'd look for it
 sheet = [
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "abcdefghijklmnopqrstuvwxyz",
@@ -41,7 +41,7 @@ sheet = [
     "´¨ˆ˜¸˛˝ˇ¯˘˙˚",
     "ÆæŒœØøÅåÇçßıÐðÞþ",
     "ÀÁÂÄÃàáâäãÈÉÊËèéêëÌÍÎÏìíîïÒÓÔÖÕòóôöõÙÚÛÜùúûüÑñÝýŸÿ",
-    "←→↑↓↖↗↘↙↰↱↲↳↵⤴⤵↺↻",
+    "←→↑↓↖↗↘↙↰↱↲↳↶↷⤵↺↻",
     "‸✓✗★",
 ]
 chars = list(dict.fromkeys("".join(sheet)))
@@ -60,6 +60,9 @@ def crop(img, c):
     img.crop(box).convert("L").save(buf, "PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
+# Characters that come out tiny in any font, so their labels are set larger
+smallLabels = set("¹²³¼½¾ªº´¨ˆ˜¸˛˝ˇ¯˘˙˚·‚„‘’“”™")
+
 weights = [("Light", "light"), ("Regular", "regular"), ("Double struck", "double")]
 inch = lambda px: f"{px / atlasDPI:.4f}in"
 
@@ -70,8 +73,8 @@ for title, name in weights:
     for c in chars:
         shown = c if atlasPos(c) else base(c)
         glyph = f'<img src="{crop(img, shown)}">' if shown and atlasPos(shown) else ""
-        label = html.escape(c)
-        cells.append(f'<div class="cell"><div class="glyph">{glyph}</div><div class="label">{label}</div></div>')
+        small = " small" if c in smallLabels else ""
+        cells.append(f'<div class="cell"><div class="glyph">{glyph}</div><div class="label{small}">{html.escape(c)}</div></div>')
     sections.append(f'<section><h2>{title}</h2><div class="grid">{"".join(cells)}</div></section>')
 
 font = sys.argv[1] if len(sys.argv) > 1 else None
@@ -84,16 +87,17 @@ page = f"""<!doctype html><meta charset="utf-8"><title>Senatorial Character Shee
 @page {{ size: 8.5in 11in; margin: 0 }}
 * {{ box-sizing: border-box }}
 body {{ margin: 0; font-family: Inconsolata, 'DejaVu Sans Mono', monospace; color: #000 }}
-main {{ width: 8.5in; height: 11in; padding: 0.5in 0.55in }}
+main {{ width: 8.5in; height: 11in; padding: 0.4in 0.55in }}
 h1 {{ font-size: 10pt; font-weight: 600; margin: 0 0 0.02in; letter-spacing: 0.04em }}
 p {{ font-size: 7pt; color: #888; margin: 0 0 0.06in }}
-h2 {{ font-size: 8pt; font-weight: 600; margin: 0.1in 0 0.02in; letter-spacing: 0.04em }}
+h2 {{ font-size: 8pt; font-weight: 600; margin: 0.08in 0 0.01in; letter-spacing: 0.04em }}
 .grid {{ display: grid; grid-template-columns: repeat(30, 0.2466in) }}
-.cell {{ height: 0.335in; display: flex; flex-direction: column; align-items: center }}
-.glyph {{ position: relative; width: {inch(gw)}; height: 0.22in; border-bottom: 0.5pt dotted #ddd }}
+.cell {{ height: 0.34in; display: flex; flex-direction: column; align-items: center }}
+.glyph {{ position: relative; width: {inch(gw)}; height: 0.2in; border-bottom: 0.5pt dotted #ddd }}
 .glyph img {{ position: absolute; left: {inch(-pad)}; bottom: {inch(baseline - gh - pad)}; width: {inch(gw + 2 * pad)};
   height: {inch(gh + 2 * pad)}; mix-blend-mode: multiply }}
-.label {{ font-size: 6pt; line-height: 0.09in; color: #999; margin-top: 0.03in }}
+.label {{ font-size: 8.5pt; line-height: 0.12in; color: #666; margin-top: 0.02in }}
+.label.small {{ font-size: 11.5pt }}
 </style>
 <main>
 <h1>SENATORIAL CHARACTER SHEET</h1>
