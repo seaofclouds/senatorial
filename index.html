@@ -144,11 +144,14 @@
     place-items: center;
     .ui { visibility: hidden; }
     .pages { padding: 1.5em 0; }
+    /* as quiet as the margin tabs, until you reach for it */
     .edit-key {
       visibility: visible;
-      color: hsl(38, 6%, 88%);
-      background: var(--body);
-      box-shadow: 0 4px 14px #0003;
+      color: hsl(30, 5%, 46%);
+      background: hsl(36, 10%, 82%);
+      opacity: .7;
+      transition: opacity .15s;
+      &:hover { opacity: 1; }
     }
   }
 
