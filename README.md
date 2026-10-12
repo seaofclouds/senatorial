@@ -9,7 +9,8 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
   far in it is from its own edge — drag them. Click a tab's link to tie it to the opposite margin, so the two mirror each other.
 - Click the strip above the sheet to set a tab stop; drag one away to clear it. The mark in the middle is the sheet's centre.
 - On a phone, swipe sideways to slide the sheet.
-- Select text to restrike it light, double struck, or in red. The alignment lever centres the paragraph you're in.
+- Select text to restrike it light, double struck, in red, in capitals, or underlined (an underscore struck over each
+  letter, the way a typist would). The alignment lever centres the paragraph you're in.
 - Tap the paper size in the corner of the sheet to feed in a different kind of paper.
 - The line space lever, under the top margin tab, sets single, 1½, or double spacing.
 - ⌘/Ctrl+Enter feeds a fresh sheet. Save downloads 600 dpi PNGs; Print prints at the exact sheet size.

@@ -119,14 +119,16 @@ glyph = (c)->
     [gx, gy]
 
 # Every character remembers how it was struck: regular, light, or double struck, on the black or red half of the ribbon,
-# and whether its paragraph is centred. Styles are kept as a string with one base-36 digit per character, alongside the text.
+# in capitals or not, underscored or not, and whether its paragraph is centred.
+# Styles are kept as a string running alongside the text, with each character's style packed into one character code.
 weights = ["regular", "light", "double"]
-styleCode = (weight, red, center = false)->
-  (weights.indexOf(weight) * 2 + (if red then 1 else 0) + (if center then 6 else 0)).toString 36
-styleValue = (code)-> parseInt code, 36
-styleWeight = (code)-> weights[(styleValue(code) % 6) >> 1]
-styleRed = (code)-> (styleValue(code) & 1) is 1
-styleCenter = (code)-> styleValue(code) >= 6
+encodeStyle = ({weight, red, center, caps, underline})->
+  String.fromCharCode 48 + weights.indexOf(weight) * 2 + (if red then 1 else 0) + (if center then 6 else 0) +
+    (if caps then 12 else 0) + (if underline then 24 else 0)
+decodeStyle = (code)->
+  v = code.charCodeAt(0) - 48
+  weight: weights[(v % 6) >> 1], red: (v & 1) is 1, center: v % 12 >= 6, caps: v % 24 >= 12, underline: v >= 24
+styleCenter = (code)-> decodeStyle(code).center
 
 # A paragraph runs up to & including its carriage return (or form feed)
 breaks = ["\n", "\f"]
@@ -148,8 +150,8 @@ centeredAt = (text, codes, i)->
 atlases = {}
 atlasNames = ["regular", "light", "double", "regular-red", "light-red"]
 
-atlasFor = (code)->
-  name = styleWeight(code) + (if styleRed code then "-red" else "")
+atlasFor = (style)->
+  name = style.weight + (if style.red then "-red" else "")
   name = "regular-red" if name is "double-red" # There's no red double struck scan
   atlases[name]
 
@@ -286,7 +288,7 @@ formatMenu = $ ".format"
 pageViews = []
 renderVersion = 0
 geo = null
-styles = "" # one style digit per character of the text — see styleCode
+styles = "" # one style per character of the text — see encodeStyle
 
 # Sheets are shown at actual size, so the type reads the way it would on the desk.
 # A CSS inch isn't a real inch (it's about ⅗" on a phone), so this uses typical real screen densities instead.
@@ -422,16 +424,24 @@ drawPage = (ctx, p, ppi)->
 
   {start, end} = layout.pages[p]
   text = layout.text
+  strike = (img, c, px, py)->
+    [gx, gy] = glyph c
+    ctx.drawImage img, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
+
   for i in [start...Math.min end, layout.n]
     c = text[i]
-    continue if c in [" ", "\n", "\t", "\f"]
-    img = atlasFor styles[i]
+    continue if c in ["\n", "\t", "\f"]
+    style = decodeStyle styles[i]
+    img = atlasFor style
     continue unless img?
-    [gx, gy] = glyph c
     [_, line, col] = layout.pos[i]
     px = col * gw
     py = lineTop(geo, line) * atlasDPI + verticalAlign
-    ctx.drawImage img, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
+    unless c is " "
+      c = c.toUpperCase() if style.caps and c.toUpperCase().length is 1
+      strike img, c, px, py
+    # Underlining is done the typist's way: an underscore struck over the same spot, ink on ink
+    strike img, "_", px, py if style.underline
   null
 
 # Along the top of each sheet: the left & right margin tabs, the tab stops, and the centre mark
@@ -553,7 +563,7 @@ scrollCaretIntoView = ()->
 saveStyles = ()->
   try localStorage.setItem "styles", styles
 
-typingStyle = (center = false)-> styleCode settings.atlas, settings.red, center
+typingStyle = (center = false)-> encodeStyle weight: settings.atlas, red: settings.red, center: center
 
 # Keep the styles lined up with the text after every edit. The edit can't begin after where the
 # selection started, which pins down where a repeated letter was inserted.
@@ -586,8 +596,9 @@ restyle = (fn)->
   render()
   true
 
-setWeight = (weight)-> restyle (c)-> styleCode weight, styleRed(c), styleCenter(c)
-setRed = (red)-> restyle (c)-> styleCode styleWeight(c), red, styleCenter(c)
+restyleWith = (changes)-> restyle (c)-> encodeStyle Object.assign decodeStyle(c), changes
+setWeight = (weight)-> restyleWith {weight}
+setRed = (red)-> restyleWith {red}
 
 # Centre (or un-centre) every paragraph the selection touches — or just the one the caret is in
 setCenter = (center)->
@@ -598,7 +609,7 @@ setCenter = (center)->
   start = paragraphStart text, a
   start-- if start is text.length and start > 0 # An empty last line takes its alignment from the line before
   end = paragraphEnd text, b
-  styles = styles.slice(0, start) + (styleCode styleWeight(c), styleRed(c), center for c in styles.slice start, end).join("") + styles.slice(end)
+  styles = styles.slice(0, start) + (encodeStyle Object.assign decodeStyle(c), {center} for c in styles.slice start, end).join("") + styles.slice(end)
   settings.center = center if text.length is 0 # Nothing typed yet, so remember it for the first line
   saveStyles()
   save "settings", settings
@@ -613,11 +624,11 @@ renderFormatMenu = ()->
   formatMenu.hidden = not show
   return unless show
 
-  sel = styles.slice a, b
+  sel = (decodeStyle c for c in styles.slice a, b)
   for btn in formatMenu.querySelectorAll "[data-weight]"
-    btn.classList.toggle "active", Array.from(sel).every (c)-> styleWeight(c) is btn.dataset.weight
-  allRed = Array.from(sel).every styleRed
-  formatMenu.querySelector("[data-red]").classList.toggle "active", allRed
+    btn.classList.toggle "active", sel.every (style)-> style.weight is btn.dataset.weight
+  for btn in formatMenu.querySelectorAll "[data-toggle]"
+    btn.classList.toggle "active", sel.every (style)-> style[btn.dataset.toggle]
 
   first = caretPoint a
   menuH = formatMenu.offsetHeight
@@ -633,7 +644,8 @@ for btn in formatMenu.querySelectorAll "button"
     if btn.dataset.weight?
       setWeight btn.dataset.weight
     else
-      setRed not btn.classList.contains "active"
+      # Red, all caps, and underline turn on for the whole selection, or off if it's all on already
+      restyleWith "#{btn.dataset.toggle}": not btn.classList.contains "active"
 
 # SETTINGS ########################################################################################
 
@@ -1142,7 +1154,12 @@ input.value = lastText = (try localStorage.getItem "text") ? ""
 
 # Text from before styles were kept per character is all in the machine's current style
 styles = (try localStorage.getItem "styles") ? ""
-styles = typingStyle().repeat input.value.length unless styles.length is input.value.length and /^[0-9ab]*$/.test styles
+# Before caps & underline, styles were base-36 digits; only the last two (centred, red or not) need moving
+unless (try localStorage.getItem "stylesVersion") is "2"
+  styles = styles.replace(/a/g, ":").replace(/b/g, ";")
+  saveStyles()
+  try localStorage.setItem "stylesVersion", "2"
+styles = typingStyle().repeat input.value.length unless styles.length is input.value.length and /^[0-_]*$/.test styles
 
 syncControls()
 loadAtlases()
