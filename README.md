@@ -37,6 +37,22 @@ on the page and take up no room on the grid — and typing them by hand works to
 
 Capitals are typed over the letters themselves, like shift lock. A backslash before a marker character prints it as is.
 
+### Tables
+
+A Markdown table sets its cells out in columns across the sheet, with no rules drawn — the way a typist would tab
+them out. The header row is just the first line (format it however you like), the delimiter row sets each column
+flush left, centred (`:---:`), or flush right (`---:`), and `<br>` breaks a line inside a cell:
+
+```
+| _Dutch oven:_ | ==or== | _Slow cooker:_ |
+|---|:---:|---|
+| simmer on low 2-3 hours<br>stir occasionally | | transfer to slow cooker<br>cook on low 6-8 hours |
+```
+
+In a table, Return starts a new line inside the cell (or, at the end of the last cell, leaves the table), Tab and
+Shift-Tab select the next and previous cells, Tab in the last cell adds a row, and the alignment lever sets the
+column. Columns spread out across the line when they fit, and wrap within a share of it when they don't.
+
 ## Running it
 
 There's no build step — `index.coffee` is compiled in the browser by `coffeescript.js`.

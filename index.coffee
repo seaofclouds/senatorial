@@ -141,17 +141,17 @@ loadAtlases = ()->
 # of the ribbon, underlined, struck through, or X'd out — and whether its paragraph is centred or flush right, or a heading.
 # Each character's style is packed into one character code, so a document's styles are a string alongside its text.
 weights = ["regular", "light", "double"]
-flags = ["red", "center", "underline", "strike", "xout", "right"]
+flags = ["red", "center", "underline", "strike", "xout", "right", "table", "header"]
 encodeStyle = (style)->
   v = Math.max 0, weights.indexOf style.weight
   v |= 4 << k for flag, k in flags when style[flag]
-  v |= (style.heading or 0) << 8 # 0 for body text, or the heading's level, 1 to 6
+  v |= (style.heading or 0) << 10 # 0 for body text, or the heading's level, 1 to 6
   String.fromCharCode 48 + v
 decodeStyle = (code)->
   v = code.charCodeAt(0) - 48
   style = weight: weights[v & 3] ? "regular"
   style[flag] = (v & (4 << k)) isnt 0 for flag, k in flags
-  style.heading = (v >> 8) & 7
+  style.heading = (v >> 10) & 7
   style
 styleAlign = (code)->
   style = decodeStyle code
@@ -185,7 +185,7 @@ delimiters = # marker character → length of the run → what it does
   "`": {1: "light"}
   "=": {2: "red"}
   "~": {2: "strike", 3: "xout"}
-escapable = "*_`=~\\-<#"
+escapable = "*_`=~\\-<#|"
 wordChar = /[\p{L}\p{N}]/u
 blankChar = /\s/
 
@@ -212,12 +212,23 @@ parseLine = (line)->
     kinds[x] = "blockOpen" for x in [start...start + heading + 1]
     start += heading + 1
 
+  spans = parseInline line, start, end, kinds
+  styles = new Array n
+  base = if heading then {weight: "double", underline: true, heading} else {weight: "regular"}
+  styles[x] = Object.assign {}, base, alignStyle align for x in [0...n] when kinds[x] is "text"
+  applySpans styles, spans, kinds
+  {kinds, styles, align, heading}
+
+# Find the inline spans between start and end, marking their markers (and any escapes) in kinds
+parseInline = (line, start, end, kinds)->
   # Find the runs of marker characters that could open or close a span
   tokens = []
   i = start
   while i < end
     c = line[i]
-    if c is "\\" and i + 1 < end and line[i + 1] in escapable
+    if kinds[i] isnt "text"
+      i++
+    else if c is "\\" and i + 1 < end and line[i + 1] in escapable
       kinds[i] = "escape"
       i += 2
     else if delimiters[c]?
@@ -252,47 +263,179 @@ parseLine = (line)->
       kinds[x] = "close" for x in [t.at...t.at + t.len]
     else if t.canOpen
       stack.push t
+  spans
 
-  # Each printed character takes on the style of every span it's in — the innermost wins for the strike
-  styles = new Array n
-  base = if heading then {weight: "double", underline: true, heading} else {weight: "regular"}
-  styles[x] = Object.assign {}, base, alignStyle align for x in [0...n] when kinds[x] is "text"
+# Each printed character takes on the style of every span it's in — the innermost wins for the strike
+applySpans = (styles, spans, kinds)->
   spans.sort (a, b)-> (b.to - b.from) - (a.to - a.from)
   for span in spans
-    for x in [span.from...span.to] when kinds[x] is "text"
+    for x in [span.from...span.to] when kinds[x] in ["text", "br"]
       if span.type in weights then styles[x].weight = span.type else styles[x][span.type] = true
-  {kinds, styles, align, heading}
+  styles
+
+# TABLES ##########################################################################################
+
+# A table is a row of cells between pipes, then a delimiter row of dashes (colons set each column's alignment),
+# then more rows:   | _Dutch oven:_ | ==or== | _Slow cooker:_ |
+#                   |---|:---:|---|
+#                   | simmer on low<br>stir occasionally | | transfer to slow cooker |
+# On the page, each cell boundary is a printed (but invisible) character, like a tab, and so is each <br>.
+cellBreak = "\u001F"
+cellLineBreak = " "
+
+isRowLine = (line)-> /^\s*\|/.test line
+
+# Where a row's cells are: the unescaped pipes between the leading & trailing ones
+splitRow = (line)->
+  i = 0
+  i++ while i < line.length and line[i] in [" ", "\t"]
+  first = i + 1 # just past the leading pipe
+  e = line.length
+  e-- while e > first and line[e - 1] in [" ", "\t"]
+  last = if e > first and line[e - 1] is "|" and line[e - 2] isnt "\\" then e - 1 else e
+  cells = []
+  s = first
+  x = first
+  while x < last
+    if line[x] is "\\"
+      x += 2
+      continue
+    if line[x] is "|"
+      cells.push [s, x]
+      s = x + 1
+    x++
+  cells.push [s, last]
+  {first, last, cells}
+
+# The alignment of each column, if this line is a table's delimiter row
+delimiterAligns = (line)->
+  return null unless /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line) and line.includes "|"
+  for [s, e] in splitRow(if isRowLine line then line else "|" + line).cells
+    cell = line.slice(s, e).trim()
+    if cell.startsWith(":") and cell.endsWith(":") then "center" else if cell.endsWith(":") then "right" else "left"
+
+parseRow = (line, aligns, header)->
+  n = line.length
+  kinds = new Array(n).fill "text"
+  styles = new Array n
+  {first, last, cells} = splitRow line
+  kinds[x] = "blockOpen" for x in [0...first]
+  kinds[x] = "blockClose" for x in [last...n]
+  termStyle = null
+  for [cs, ce], c in cells
+    base = Object.assign {weight: "regular", table: true, header}, alignStyle aligns[c] ? "left"
+    # One space each side of a pipe is padding; any more is part of the cell, so a space typed at the end of a cell
+    # stays put until the next word arrives
+    a = cs
+    a++ if a < ce and line[a] is " "
+    z = ce
+    z-- if z > a and line[z - 1] is " "
+    kinds[x] = "blockOpen" for x in [cs...a]
+    kinds[x] = "blockClose" for x in [z...ce]
+    # A <br> breaks the line inside the cell
+    x = a
+    while x < z
+      if m = line.slice(x, z).match /^<br\s*\/?>/i
+        kinds[x] = "br"
+        kinds[y] = "brTail" for y in [x + 1...x + m[0].length]
+        x += m[0].length
+      else
+        x++
+    spans = parseInline line, a, z, kinds
+    styles[x] = Object.assign {}, base for x in [a...z] when kinds[x] in ["text", "br"]
+    applySpans styles, spans, kinds
+    # The pipe after each cell (or the end of the row) carries that cell's column alignment
+    if ce < last
+      kinds[ce] = "sep"
+      styles[ce] = Object.assign {}, base
+    termStyle = base
+  {kinds, styles, termStyle}
+
+# Read just a cell's contents, to check it reads back the way it was written
+parseCell = (md)->
+  kinds = new Array(md.length).fill "text"
+  x = 0
+  while x < md.length
+    if m = md.slice(x).match /^<br\s*\/?>/i
+      kinds[x] = "br"
+      kinds[y] = "brTail" for y in [x + 1...x + m[0].length]
+      x += m[0].length
+    else
+      x++
+  spans = parseInline md, 0, md.length, kinds
+  styles = (Object.assign {weight: "regular"} for x in [0...md.length])
+  applySpans styles, spans, kinds
+  {kinds, styles}
 
 # Read a whole document: the printed text, a style for each printed character (plus one for the end),
 # where each printed character sits in the Markdown, and what every Markdown character is
 parseMarkdown = (raw)->
+  # Split it into lines first, so tables (which run across lines) can be spotted
+  lines = []
+  s = 0
+  loop
+    b = s
+    b++ while b < raw.length and raw[b] not in breaks
+    lines.push {start: s, end: b, text: raw.slice s, b}
+    break if b is raw.length
+    s = b + 1
+  k = 0
+  while k < lines.length
+    if isRowLine(lines[k].text) and k + 1 < lines.length and (aligns = delimiterAligns lines[k + 1].text)? and
+        splitRow(lines[k].text).cells.length is aligns.length
+      lines[k].row = {aligns, header: true}
+      lines[k + 1].delimiter = true
+      k += 2
+      while k < lines.length and isRowLine lines[k].text
+        lines[k].row = {aligns, header: false}
+        k++
+    else
+      k++
+
   chars = []
   codes = []
   rawOf = []
   kinds = []
   visBefore = new Array raw.length + 1
-  lineStart = 0
-  loop
-    b = lineStart
-    b++ while b < raw.length and raw[b] not in breaks
-    line = parseLine raw.slice lineStart, b
-    for kind, x in line.kinds
-      visBefore[lineStart + x] = chars.length
-      kinds.push kind
-      if kind is "text"
-        chars.push raw[lineStart + x]
-        codes.push encodeStyle line.styles[x]
-        rawOf.push lineStart + x
-    break if b is raw.length
-    visBefore[b] = chars.length
-    kinds.push "text"
-    chars.push raw[b]
-    codes.push encodeStyle Object.assign alignStyle(line.align), heading: line.heading
-    rawOf.push b
-    lineStart = b + 1
+  termStyle = {}
+  headerTerm = {}
+  for line, k in lines
+    if line.delimiter
+      # The delimiter row doesn't print. Its line break is the one that ends the header row on the page.
+      for x in [line.start...line.end]
+        visBefore[x] = chars.length
+        kinds.push "delimiter"
+      termStyle = headerTerm
+    else
+      parsed = if line.row then parseRow(line.text, line.row.aligns, line.row.header) else parseLine(line.text)
+      for kind, x in parsed.kinds
+        visBefore[line.start + x] = chars.length
+        kinds.push kind
+        printed = switch kind
+          when "text" then line.text[x]
+          when "sep" then cellBreak
+          when "br" then cellLineBreak
+        if printed?
+          chars.push printed
+          codes.push encodeStyle parsed.styles[x]
+          rawOf.push line.start + x
+      termStyle =
+        if line.row then Object.assign {}, parsed.termStyle
+        else Object.assign alignStyle(parsed.align), heading: parsed.heading
+    break if line.end is raw.length
+    visBefore[line.end] = chars.length
+    if line.row?.header
+      # The header row's own line break is hidden; the delimiter row's ends it on the page
+      kinds.push "delimiter"
+      headerTerm = termStyle
+    else
+      kinds.push "text"
+      chars.push raw[line.end]
+      codes.push encodeStyle termStyle
+      rawOf.push line.end
   visBefore[raw.length] = chars.length
   rawOf.push raw.length
-  codes.push encodeStyle Object.assign alignStyle(line.align), heading: line.heading # The end carries the last line's
+  codes.push encodeStyle termStyle # The end carries the last line's alignment (or heading, or table cell)
   {raw, text: chars.join(""), styles: codes.join(""), rawOf, kinds, visBefore}
 
 # Spans open outermost-first in this order, so light text with an underline reads `_like this_`
@@ -351,8 +494,14 @@ writeLine = (chars, styles, align, heading, opts)->
     for type in opening
       out += markerFor type, opts
       stack.push type
-    out += if opts.escape and c in escapable then "\\" + c else c
+    out +=
+      if c is cellLineBreak then (if opts.cell then "<br>" else " ")
+      else if c is cellBreak then " " # A cell boundary that's ended up outside a table is just a space
+      else if c is "|" and opts.cell then "\\|"
+      else if opts.escape and c in escapable then "\\" + c
+      else c
   out += markerFor type, opts for type in stack.slice().reverse()
+  return out if opts.cell
   if heading
     out = "#".repeat(heading) + " " + out
   else if /^#{1,6} /.test out
@@ -391,6 +540,42 @@ serializeLine = (chars, codes, align, heading)->
   # styling as Markdown allows, rather than let markers show up on the page
   writeLine chars, styles, align, heading, {underline: "_", escape: true, split: true}
 
+# Write one cell's contents, checking it reads back the same, like serializeLine
+inlineKey = (s)-> encodeStyle weight: s.weight, red: s.red, underline: s.underline, strike: s.strike, xout: s.xout
+serializeCell = (chars, codes)->
+  styles = trimSpans chars, (decodeStyle c for c in codes)
+  want = (inlineKey s for s in styles).join ""
+  for opts in [{underline: "_", cell: true}, {underline: "*", cell: true}, {underline: "_", escape: true, cell: true}]
+    md = writeLine chars, styles, "left", 0, opts
+    back = parseCell md
+    printed = (for kind, x in back.kinds when kind in ["text", "br"] then (if kind is "br" then cellLineBreak else md[x])).join ""
+    codesBack = (inlineKey back.styles[x] for kind, x in back.kinds when kind in ["text", "br"]).join ""
+    return md if printed is chars.join("") and codesBack is want
+  writeLine chars, styles, "left", 0, {underline: "_", escape: true, cell: true, split: true}
+
+alignMarker = (align)-> switch align
+  when "center" then ":---:"
+  when "right" then "---:"
+  else "---"
+
+# Write a table row. Each cell boundary (and the row's line break, or end) carries its cell's column alignment, which
+# the header row writes out as the delimiter row beneath it.
+serializeRow = (chars, codes, termCode)->
+  cells = [[[], []]]
+  aligns = []
+  for c, x in chars
+    if c is cellBreak
+      aligns.push styleAlign codes[x]
+      cells.push [[], []]
+    else
+      cells[cells.length - 1][0].push c
+      cells[cells.length - 1][1].push codes[x]
+  aligns.push if termCode? then styleAlign termCode else "left"
+  md = "| " + (serializeCell cell, cellCodes for [cell, cellCodes] in cells).join(" | ") + " |"
+  if decodeStyle(codes[0] ? termCode ? encodeStyle {}).header
+    md += "\n| " + (alignMarker align for align in aligns).join(" | ") + " |"
+  md
+
 # Write a run of whole paragraphs back into Markdown. codes has a style for each character — plus one more when the
 # run reaches the end of the document, for its last line.
 serializeBlock = (text, codes)->
@@ -399,7 +584,11 @@ serializeBlock = (text, codes)->
   loop
     j = i
     j++ while j < text.length and text[j] not in breaks
-    out += serializeLine Array.from(text.slice i, j), codes.slice(i, j), styleAlign(codes[i]), decodeStyle(codes[i]).heading
+    first = decodeStyle codes[i] ? encodeStyle {}
+    if first.table
+      out += serializeRow Array.from(text.slice i, j), codes.slice(i, j), codes[j]
+    else
+      out += serializeLine Array.from(text.slice i, j), codes.slice(i, j), styleAlign(codes[i]), first.heading
     break if j is text.length
     out += text[j]
     i = j + 1
@@ -416,9 +605,13 @@ layout = null
 
 doLayout = (g)->
   text = doc.text
+  styles = doc.styles
   n = text.length
   pos = new Array n + 1
-  lines = [] # {page, line, start, end} — the range of indices whose caret position is on each line
+  # Each run of text that sits on one line: an ordinary line, or one line of a table cell. A table row puts several
+  # of these side by side. {page, line, start, end, align, left, right} — the range of indices whose caret position
+  # is in the run, how it's aligned, and the columns it's laid out between.
+  lines = []
   pages = [] # {start, end, firstLine}
 
   page = 0
@@ -437,18 +630,119 @@ doLayout = (g)->
     line = 0
     page++
 
+  addRun = (run)->
+    pages.push {start: run.start, firstLine: lines.length} if run.page isnt lines[lines.length - 1]?.page
+    lines.push run
+
   place = (i)->
     pos[i] = [page, line, col]
     last = lines[lines.length - 1]
-    if last?.page is page and last.line is line
+    if last?.page is page and last.line is line and not last.cell
       last.end = i
     else
-      if page isnt last?.page
-        pages.push {start: i, firstLine: lines.length}
-      lines.push {page, line, start: i, end: i, align: alignAt text, doc.styles, i}
+      addRun {page, line, start: i, end: i, align: alignAt(text, styles, i), left: g.left, right: g.right}
+
+  isTableRow = (i)-> decodeStyle(styles[i] ? encodeStyle {}).table
+
+  # Lay out a table — its rows, starting at i — and return the index just past it
+  layoutTable = (i)->
+    # Gather the rows, each split into cells at the (invisible) cell boundaries
+    rows = []
+    loop
+      end = i
+      end++ while end < n and text[end] not in breaks
+      cells = []
+      s = i
+      for x in [i..end]
+        if x is end or text[x] is cellBreak
+          cells.push {start: s, end: x}
+          s = x + 1
+      rows.push {start: i, end, cells}
+      i = end + 1
+      break unless end < n and i < n and isTableRow(i) and not decodeStyle(styles[i]).header
+
+    columns = Math.max (row.cells.length for row in rows)...
+    header = rows[0]
+    aligns = for c in [0...columns]
+      at = header.cells[c]?.end
+      if at? then styleAlign styles[at] ? encodeStyle {} else "left"
+
+    # Each column is as wide as its longest line, and whatever room is left goes between the columns, so the table
+    # spans the margins. If it doesn't fit, the columns share the room and their text wraps.
+    natural = (0 for c in [0...columns])
+    for row in rows
+      for cell, c in row.cells
+        for piece in text.slice(cell.start, cell.end).split cellLineBreak
+          natural[c] = Math.max natural[c], piece.length
+    natural = (Math.max 1, w for w in natural)
+    room = g.right - g.left
+    gap = 2
+    if columns is 1
+      widths = [room]
+      gaps = []
+    else if natural.reduce(((a, b)-> a + b), 0) + gap * (columns - 1) <= room
+      widths = natural
+      extra = room - widths.reduce(((a, b)-> a + b), 0) - gap * (columns - 1)
+      gaps = (gap + Math.floor(extra / (columns - 1)) + (if c < extra % (columns - 1) then 1 else 0) for c in [0...columns - 1])
+    else
+      share = room - gap * (columns - 1)
+      total = natural.reduce ((a, b)-> a + b), 0
+      widths = (Math.max 3, Math.floor w * share / total for w in natural)
+      gaps = (gap for c in [0...columns - 1])
+    xs = [g.left]
+    xs.push xs[c] + widths[c] + gaps[c] for c in [0...columns - 1]
+
+    for row in rows
+      # Wrap each cell's text within its column
+      laid = for cell, c in row.cells
+        width = widths[c]
+        cellLines = [[]]
+        at = 0
+        k = cell.start
+        breakLine = ()->
+          cellLines.push []
+          at = 0
+        while k < cell.end
+          ch = text[k]
+          if ch is cellLineBreak
+            cellLines[cellLines.length - 1].push [k++, at]
+            breakLine()
+          else if ch in [" ", "\t"]
+            breakLine() if at > width
+            cellLines[cellLines.length - 1].push [k++, at++]
+          else
+            j = k
+            j++ while j < cell.end and text[j] not in [" ", "\t", cellLineBreak]
+            breakLine() if at + (j - k) > width and at > 0
+            while k < j
+              breakLine() if at >= width
+              cellLines[cellLines.length - 1].push [k++, at++]
+        # The cell's boundary (or the row's line break) is where the caret sits at the end of the cell
+        cellLines[cellLines.length - 1].push [cell.end, at]
+        cellLines
+
+      height = Math.max (cellLines.length for cellLines in laid)...
+      newpage() if line + height > g.linesPerPage and line > 0
+      for cellLines, c in laid
+        for entries, m in cellLines when entries.length
+          for [k, at] in entries
+            pos[k] = [page, line + m, xs[c] + at]
+          addRun {page, line: line + m, start: entries[0][0], end: entries[entries.length - 1][0], cell: true,
+            align: aligns[c], left: xs[c], right: xs[c] + widths[c]}
+      line += height
+      if text[row.end] is "\f"
+        newpage()
+      else if line >= g.linesPerPage
+        line = 0
+        page++
+      col = g.left
+    i
 
   i = 0
   while i < n
+    if (i is 0 or text[i - 1] in breaks) and isTableRow i
+      i = layoutTable i
+      continue
     c = text[i]
     if c is "\n"
       place i++
@@ -473,16 +767,17 @@ doLayout = (g)->
         newline() if col >= g.right # Words longer than a whole line get broken
         place i++
         col++
-  place n
+  place n unless pos[n]? # (A table at the very end has already placed it, at the end of its last cell)
 
   # Centred lines are spaced in from the left margin by half the room left over, and flush right lines by all of it,
-  # landing on the grid the same way a typist would backspace from the middle or from the right margin
-  blank = [" ", "\n", "\t", "\f"]
+  # landing on the grid the same way a typist would backspace from the middle or from the right margin.
+  # Table cells do the same within their columns.
+  blank = [" ", "\n", "\t", "\f", cellBreak, cellLineBreak]
   for ln in lines when ln.align isnt "left"
     last = null
     last = i for i in [ln.start..ln.end] when i < n and text[i] not in blank
-    width = if last? then pos[last][2] + 1 - g.left else 0
-    room = Math.max 0, g.right - g.left - width
+    width = if last? then pos[last][2] + 1 - ln.left else 0
+    room = Math.max 0, ln.right - ln.left - width
     shift = if ln.align is "center" then Math.floor room / 2 else room
     pos[i][2] += shift for i in [ln.start..ln.end]
 
@@ -490,7 +785,18 @@ doLayout = (g)->
     p.end = pages[k + 1]?.start ? n + 1
     p.lastLine = (pages[k + 1]?.firstLine ? lines.length) - 1
 
-  layout = {text, n, pos, lines, pages}
+  # The rows of type, top to bottom, and the runs on each — for moving up & down
+  rowKeys = []
+  rowRuns = new Map()
+  for ln in lines
+    key = rowKey ln
+    rowKeys.push key unless rowRuns.has key
+    (rowRuns.get(key) ? rowRuns.set(key, []).get(key)).push ln
+  rowKeys.sort (a, b)-> a - b
+
+  layout = {text, n, pos, lines, pages, rowKeys, rowRuns}
+
+rowKey = (ln)-> ln.page * 100000 + ln.line
 
 # Which entry in layout.lines holds index i?
 lineIndexOf = (i)->
@@ -507,14 +813,29 @@ indexAtCol = (ln, col)->
     return i if layout.pos[i][2] >= col
   ln.end
 
+# Of a row's runs (several, across a table), the one nearest a column
+runNearest = (runs, col)->
+  best = null
+  bestDistance = Infinity
+  for ln in runs
+    distance = if col < ln.left then ln.left - col else if col > ln.right then col - ln.right else 0
+    [best, bestDistance] = [ln, distance] if distance < bestDistance
+  best
+
 # The index nearest to a spot on a page, in inches from the sheet's top left corner
 indexAtPoint = (g, page, x, y)->
   return layout.n if page >= layout.pages.length
   return 0 if page < 0
   p = layout.pages[page]
   line = Math.floor (y * linesPerInch - g.top) / g.spacing
-  ln = layout.lines[clamp p.firstLine + line, p.firstLine, p.lastLine]
-  indexAtCol ln, Math.round x * charactersPerInch
+  col = Math.round x * charactersPerInch
+  # The nearest row of type on this page, then the run on it nearest the pointer
+  nearest = null
+  for k in [p.firstLine..p.lastLine]
+    ln = layout.lines[k]
+    nearest = ln.line if not nearest? or Math.abs(ln.line - line) < Math.abs(nearest - line)
+  runs = (layout.lines[k] for k in [p.firstLine..p.lastLine] when layout.lines[k].line is nearest)
+  indexAtCol runNearest(runs, col), col
 
 # RENDERING #######################################################################################
 
@@ -671,7 +992,7 @@ drawPage = (ctx, p, ppi)->
 
   for i in [start...Math.min end, layout.n]
     c = text[i]
-    continue if c in ["\n", "\t", "\f"]
+    continue if c in ["\n", "\t", "\f", cellBreak, cellLineBreak]
     style = decodeStyle doc.styles[i]
     img = atlasFor style
     continue unless img?
@@ -741,6 +1062,9 @@ focusIndex = ()->
 normalizeCaret = ()->
   r = input.selectionStart
   return unless r is input.selectionEnd
+  return if doc.kinds[r - 1] is "delimiter" # Typing a table's delimiter row: leave the caret where the typing is
+  # Likewise typing a row by hand, past the padding or pipe just typed at the end of it
+  return if doc.kinds[r - 1] is "blockClose" and (r is doc.raw.length or doc.raw[r] in breaks) and inTable visAt r
   c = rawAt visAt r
   input.setSelectionRange c, c unless c is r
 
@@ -820,7 +1144,7 @@ reparse = ()-> doc = parseMarkdown input.value
 rawAtIn = (d, k)->
   r = d.rawOf[clamp k, 0, d.text.length]
   r++ while r < d.kinds.length and d.kinds[r] in ["close", "blockOpen"]
-  r-- while r > 0 and d.kinds[r - 1] in ["open", "blockClose", "escape"]
+  r-- while r > 0 and d.kinds[r - 1] in ["open", "blockClose", "escape", "delimiter"]
   r
 rawAt = (k)-> rawAtIn doc, k
 visAt = (r)-> doc.visBefore[clamp r, 0, doc.raw.length]
@@ -844,9 +1168,19 @@ replaceRaw = (start, end, str)->
 
 # Replace printed characters [a, b) with ins (styled insCodes), then rewrite every paragraph it touched as Markdown,
 # so spans stay balanced however the text around them changes
-# endPatch changes the style carried by the end of the document (its last line's alignment, or whether it's a heading).
-edit = (a, b, ins, insCodes, select, endPatch, follow = true)->
+# opts.select: the selection afterwards, in printed characters (the caret after what's inserted, otherwise)
+# opts.endPatch: changes the style carried by the end of the document (its last line's alignment, or whether it's a
+#   heading or a table row)
+# opts.follow: whether the carriage follows the caret (yes, unless it's a restyle)
+# opts.keepUntil: a table's cell boundaries & row breaks in [a, keepUntil) are kept unless their whole row is going.
+#   Edits that put everything back themselves (restyling, say) pass a.
+edit = (a, b, ins, insCodes, opts = {})->
+  {select, endPatch, follow = true, keepUntil = b} = opts
   {text, styles} = doc
+  # Deleting part of a table clears the text but keeps its cells and rows, unless whole rows go
+  [keep, keepCodes] = tableStructureIn a, keepUntil
+  ins += keep
+  insCodes += keepCodes
   newText = text.slice(0, a) + ins + text.slice(b)
   newCodes = styles.slice(0, a) + insCodes + styles.slice(b)
   if endPatch?
@@ -858,22 +1192,54 @@ edit = (a, b, ins, insCodes, select, endPatch, follow = true)->
   rawEnd = if end is text.length then doc.raw.length else doc.rawOf[end - 1] + 1
   codes = newCodes.slice start, newEnd + (if end is text.length then 1 else 0)
   replaceRaw rawStart, rawEnd, serializeBlock newText.slice(start, newEnd), codes
-  [anchor, focus] = select ? [a + ins.length, a + ins.length]
+  [anchor, focus] = select ? [a + ins.length - keep.length, a + ins.length - keep.length]
   setSelection anchor, focus, follow
 
 # Type over the selection (or into an empty centred or flush right line), keeping the style of what's being replaced
+# Is printed position k in a table row? (A row's style is carried by its first character, like a paragraph's.)
+inTable = (k)-> decodeStyle(doc.styles[paragraphStart doc.text, k] ? encodeStyle {}).table
+
+# The cell boundaries and row breaks in [a, b) that have to stay, because the cell or row they belong to doesn't go
+# entirely, as [characters, styles]
+tableStructureIn = (a, b)->
+  {text, styles} = doc
+  keep = ""
+  keepCodes = ""
+  for x in [a...b]
+    isBoundary = text[x] is cellBreak or (text[x] in breaks and decodeStyle(styles[x]).table)
+    continue unless isBoundary
+    rowStart = paragraphStart text, x
+    rowEnd = paragraphEnd(text, x) - 1 # the row's line break
+    unless a <= rowStart and rowEnd < b
+      keep += text[x]
+      keepCodes += styles[x]
+  [keep, keepCodes]
+
 typeText = (str)->
   [a, b] = selected()
+  {text} = doc
   style = if a < b then decodeStyle doc.styles[a] else {}
-  Object.assign style, alignStyle alignAt doc.text, doc.styles, a
+  Object.assign style, alignStyle alignAt text, doc.styles, a
+  if inTable a
+    # Typing in a table: the row's flags come along, and Return breaks the line inside the cell — except at the end
+    # of the table's last cell, where it leaves the table
+    rowStyle = decodeStyle doc.styles[paragraphStart text, a]
+    Object.assign style, table: true, header: rowStyle.header
+    atRowEnd = b is text.length or text[b] in breaks
+    leaving = atRowEnd and (b is text.length or not inTable b + 1)
+    str = str.replace /\n/g, cellLineBreak unless leaving and str is "\n"
   codes = encodeStyle(style).repeat(str.length)
-  # A new line after a heading is body text: the line break that will start it stops carrying the heading
-  if str[str.length - 1] in breaks
-    if b < doc.text.length and doc.text[b] in breaks
-      next = encodeStyle Object.assign decodeStyle(doc.styles[b]), heading: 0
-      return edit a, b + 1, str + doc.text[b], codes + next, [a + str.length, a + str.length]
-    else if b is doc.text.length
-      return edit a, b, str, codes, null, {heading: 0}
+  # A new line after a heading (or a table) is body text: the line break that will start it stops carrying them
+  if str[str.length - 1] in breaks and (b is text.length or text[b] in breaks)
+    plain = {heading: 0, table: false, header: false}
+    if inTable a
+      Object.assign plain, alignStyle "left"
+      codes = codes.slice(0, -1) + (doc.styles[b] ? codes.slice -1) # The row keeps its line break, and its alignment
+    if b < text.length
+      next = encodeStyle Object.assign decodeStyle(doc.styles[b]), plain
+      return edit a, b + 1, str + text[b], codes + next, select: [a + str.length, a + str.length], keepUntil: b
+    else
+      return edit a, b, str, codes, endPatch: plain
   edit a, b, str, codes
 
 isBlank = (c)-> c? and blankChar.test(c) and c not in breaks
@@ -908,7 +1274,10 @@ deleteFor = (inputType)->
     else [k, k]
   from = clamp from, 0, text.length
   to = clamp to, 0, text.length
-  edit from, to, "", "", [from, from] if from < to
+  # Don't join a paragraph onto a table, or a table onto a paragraph
+  if to - from is 1 and text[from] in breaks and (inTable(from) isnt inTable(to) or (inTable(to) and not inTable(from)))
+    return
+  edit from, to, "", "", select: [from, from] if from < to
 
 # Every edit that could split or join a span goes through the paragraph rewriter. Plain typing goes straight in, so
 # typing Markdown by hand works too.
@@ -918,7 +1287,11 @@ input.addEventListener "beforeinput", (e)->
   t = e.inputType
   emptyAlignedLine = a is b and alignAt(doc.text, doc.styles, a) isnt "left" and paragraphStart(doc.text, a) is a and
     doc.text[a] in [undefined, "\n", "\f"] and not input.value.slice(0, input.selectionStart).endsWith "->"
-  if t in ["insertText", "insertReplacementText"] and (a < b or emptyAlignedLine)
+  # The first letter typed into an empty table cell rewrites the row, so it reads "| ok |" rather than "| ok|"
+  r = input.selectionStart
+  emptyCell = a is b and inTable(a) and input.value.slice(r - 2, r + 1) is "| |" and input.value[r - 3] isnt "\\" and
+    /\S/.test e.data ? ""
+  if t in ["insertText", "insertReplacementText"] and (a < b or emptyAlignedLine or emptyCell)
     e.preventDefault()
     typeText e.data ? e.dataTransfer?.getData("text/plain") ? ""
   else if t in ["insertLineBreak", "insertParagraph"]
@@ -938,11 +1311,12 @@ input.addEventListener "paste", (e)->
   e.preventDefault()
   return typeText pasted if parseMarkdown(pasted).text.length is pasted.length
   {text, styles} = doc
+  [keep, keepCodes] = tableStructureIn a, b
   start = paragraphStart text, a
   end = paragraphEnd text, b
-  newEnd = end - (b - a)
-  codes = (styles.slice(0, a) + styles.slice(b)).slice start, newEnd + (if end is text.length then 1 else 0)
-  md = serializeBlock (text.slice(0, a) + text.slice(b)).slice(start, newEnd), codes
+  newEnd = end - (b - a) + keep.length
+  codes = (styles.slice(0, a) + keepCodes + styles.slice(b)).slice start, newEnd + (if end is text.length then 1 else 0)
+  md = serializeBlock (text.slice(0, a) + keep + text.slice(b)).slice(start, newEnd), codes
   at = rawAtIn parseMarkdown(md), a - start
   rawStart = if start is 0 then 0 else doc.rawOf[start - 1] + 1
   rawEnd = if end is text.length then doc.raw.length else doc.rawOf[end - 1] + 1
@@ -971,7 +1345,7 @@ restyleWith = (changes)->
   return unless a < b
   [anchor, focus] = getAnchorFocus()
   codes = (encodeStyle Object.assign decodeStyle(c), changes for c in doc.styles.slice a, b).join ""
-  edit a, b, doc.text.slice(a, b), codes, [anchor, focus], null, false # Restyling leaves the carriage where it is
+  edit a, b, doc.text.slice(a, b), codes, select: [anchor, focus], follow: false, keepUntil: a # The carriage stays put
 
 # Capitals are typed over the letters themselves, like shift lock. Pressing Caps again puts back the letters as they
 # were, as long as this session remembers them; otherwise they go to lower case. Undo always works too.
@@ -991,19 +1365,97 @@ toggleCaps = ()->
   else
     replacement = toUpper seg
     capsMemory.set replacement, seg
-  edit a, b, replacement, doc.styles.slice(a, b), [anchor, focus], null, false
+  edit a, b, replacement, doc.styles.slice(a, b), select: [anchor, focus], follow: false, keepUntil: a
 
 # Align every paragraph the selection touches — or just the one the caret is in
 setAlign = (align)->
   [a, b] = selected()
   [anchor, focus] = getAnchorFocus()
   text = doc.text
+  return setColumnAlign align if inTable a
   b-- if b > a and text[b - 1] in breaks # A selection ending just after a carriage return stops at that line
   start = paragraphStart text, a
   end = paragraphEnd text, b
   codes = (encodeStyle Object.assign decodeStyle(c), alignStyle align for c in doc.styles.slice start, end).join ""
   endPatch = if end is text.length then alignStyle align else null
-  edit start, end, text.slice(start, end), codes, [anchor, focus], endPatch, false
+  edit start, end, text.slice(start, end), codes, select: [anchor, focus], endPatch: endPatch, follow: false, keepUntil: start
+
+# Where a printed position sits in a table: its table's rows, and which column it's in
+tableAt = (k)->
+  {text, styles} = doc
+  rowStart = paragraphStart text, k
+  column = (x for x in [rowStart...k] when text[x] is cellBreak).length
+  start = rowStart
+  until decodeStyle(styles[start]).header or start is 0 or not inTable start - 1
+    start = paragraphStart text, start - 1
+  end = paragraphEnd text, k
+  end = paragraphEnd text, end while end < text.length and inTable(end) and not decodeStyle(styles[end]).header
+  {start, end, column}
+
+# The end of column c's cell in the row starting at rowStart: its cell boundary, or the row's line break
+cellEndIn = (rowStart, c)->
+  {text} = doc
+  x = rowStart
+  seen = 0
+  while x < text.length and text[x] not in breaks
+    if text[x] is cellBreak
+      return x if seen is c
+      seen++
+    x++
+  if seen is c then x else null
+
+columnAlignAt = (k)->
+  {start, column} = tableAt k
+  at = cellEndIn start, column
+  styleAlign doc.styles[at] ? encodeStyle {}
+
+# The alignment lever, in a table, sets the whole column the caret is in
+setColumnAlign = (align)->
+  [anchor, focus] = getAnchorFocus()
+  {start, end, column} = tableAt focus
+  {text, styles} = doc
+  codes = styles.slice(start, end).split ""
+  rowStart = start
+  while rowStart < end
+    at = cellEndIn rowStart, column
+    if at?
+      x = at
+      x-- while x > rowStart and text[x - 1] isnt cellBreak
+      for y in [x..at] when y - start < codes.length
+        codes[y - start] = encodeStyle Object.assign decodeStyle(codes[y - start]), alignStyle align
+    rowStart = paragraphEnd text, rowStart
+  endPatch = if end is text.length and cellEndIn(paragraphStart(text, end), column) is end then alignStyle align else null
+  edit start, end, text.slice(start, end), codes.join(""), select: [anchor, focus], endPatch: endPatch, follow: false, keepUntil: start
+
+# Tab moves to the next cell (selecting what's in it), Shift-Tab to the one before. Tab in the last cell adds a row.
+tabToCell = (back)->
+  {text, styles} = doc
+  k = focusIndex()
+  cellStart = (x)->
+    x-- while x > 0 and text[x - 1] isnt cellBreak and text[x - 1] not in breaks
+    x
+  cellEnd = (x)->
+    x++ while x < text.length and text[x] isnt cellBreak and text[x] not in breaks
+    x
+  if back
+    s = cellStart k
+    return if s is 0 or not (text[s - 1] is cellBreak or inTable s - 1)
+    setSelection cellStart(s - 1), s - 1
+  else
+    e = cellEnd k
+    if text[e] is cellBreak or (e < text.length and inTable(e + 1) and not decodeStyle(styles[e + 1]).header)
+      setSelection e + 1, cellEnd e + 1
+    else
+      # The table's last cell: add a row with as many cells as this one
+      rowStart = paragraphStart text, k
+      bounds = (x for x in [rowStart...e] when text[x] is cellBreak)
+      boundCodes = (encodeStyle Object.assign decodeStyle(styles[x]), header: false for x in bounds).join ""
+      row = "\n" + cellBreak.repeat bounds.length
+      if e < text.length
+        next = encodeStyle Object.assign decodeStyle(styles[e]), header: false
+        edit e, e + 1, row + text[e], styles[e] + boundCodes + next, select: [e + 1, e + 1], keepUntil: e
+      else
+        edit e, e, row, styles[e] + boundCodes, select: [e + 1, e + 1], endPatch: {header: false}
 
 # A little menu that pops up over a selection, for striking it differently
 renderFormatMenu = ()->
@@ -1091,7 +1543,8 @@ alignLever.classList.add "spacer"
 $("#paper").after alignLever
 
 syncAlign = ()->
-  setLever alignLever, alignments, alignAt doc.text, doc.styles, focusIndex()
+  k = focusIndex()
+  setLever alignLever, alignments, if inTable k then columnAlignAt k else alignAt doc.text, doc.styles, k
 
 paperName = ()->
   if settings.paper is "custom"
@@ -1374,15 +1827,15 @@ insertText = (str)->
     input.setRangeText str, input.selectionStart, input.selectionEnd, "end"
     input.dispatchEvent new Event "input"
 
-moveVertically = (lines, extend)->
+# Up & down go a row of type at a time — across a table, to whichever cell is under the caret
+moveVertically = (rows, extend)->
   [anchor, focus] = getAnchorFocus()
-  k = lineIndexOf focus
   goalCol ?= layout.pos[focus][2]
-  target = k + lines
+  target = layout.rowKeys.indexOf(rowKey layout.lines[lineIndexOf focus]) + rows
   newFocus =
     if target < 0 then 0
-    else if target >= layout.lines.length then layout.n
-    else indexAtCol layout.lines[target], goalCol
+    else if target >= layout.rowKeys.length then layout.n
+    else indexAtCol runNearest(layout.rowRuns.get(layout.rowKeys[target]), goalCol), goalCol
   setSelection (if extend then anchor else newFocus), newFocus
 
 moveToLineEdge = (end, extend)->
@@ -1400,7 +1853,8 @@ input.addEventListener "keydown", (e)->
 
   if e.key is "Tab" and not (e.ctrlKey or e.metaKey or e.altKey)
     e.preventDefault()
-    insertText "\t" unless e.shiftKey
+    if inTable focusIndex() then tabToCell e.shiftKey
+    else insertText "\t" unless e.shiftKey
   else if e.key is "Enter" and (e.metaKey or e.ctrlKey)
     e.preventDefault()
     typeText "\f" # Feed in a fresh sheet
