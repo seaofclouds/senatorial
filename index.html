@@ -116,10 +116,14 @@
 
   /* MACHINE ****************************************************************************************/
 
+  /* The machine stays put at the foot of the screen, with room kept under the sheets so the last one can be typed on */
   .ui {
-    position: sticky;
+    position: fixed;
+    left: 50%;
     bottom: 2em;
     z-index: 1;
+    width: calc(min(100%, 72em) - 1em);
+    translate: -50% 0;
     display: flex;
     flex-flow: column;
     padding: 1em 1.5em;
@@ -129,24 +133,23 @@
 
   .saved { font-size: .85rem; color: hsl(38, 4%, 62%); }
 
-  /* READING — a page's link shows just the page, in the middle of the screen (or from the top, when it's taller),
-     with a key to bring up the machine */
+  body:not(.viewing) section { padding-bottom: calc(var(--deck-height, 4em) + 3.5em); }
+
+  /* Save is the machine's last key */
+  .edit-key { background: var(--key-active); }
+
+  /* READING — a page's link shows just the page, in the middle of the screen (or from the top, when it's taller).
+     The machine is put away, all but its last key, which reads Edit, right where Save was. */
   body.viewing {
     place-items: center;
-    .ui { display: none; }
+    .ui { visibility: hidden; }
     .pages { padding: 1.5em 0; }
-  }
-
-  /* Edit, and then Save, in the same spot in the corner (the machine stops short of it) */
-  .edit-key {
-    position: fixed;
-    right: 1.5em;
-    bottom: 1.5em;
-    z-index: 1;
-    padding: .3em 1.1em;
-    color: hsl(38, 6%, 88%);
-    background: var(--body);
-    box-shadow: 0 4px 14px #0003;
+    .edit-key {
+      visibility: visible;
+      color: hsl(38, 6%, 88%);
+      background: var(--body);
+      box-shadow: 0 4px 14px #0003;
+    }
   }
 
   /* MARGIN & TAB STOPS — light tabs, rounded on the outside, pointing at exactly where each margin falls */
@@ -554,7 +557,7 @@
 
   @media print {
     body { display: block; background: none; }
-    section, .edit-key { display: none; }
+    section { display: none; }
     .print { display: block; }
     .print .leaf { position: relative; break-inside: avoid; }
     .print .leaf:not(:last-child) { break-after: page; }
@@ -564,13 +567,8 @@
     .print .trim.down { height: .25in; margin-left: -.25pt; border-left: .5pt solid black; }
   }
 
-  .key-room { display: none; }
-
   @media (max-width: 700px) {
     .ui { bottom: .5em; padding: .75em; }
-    /* On a phone the machine spans the screen, so the Edit/Save key sits in its inner corner, over room kept for it */
-    .edit-key { right: 1.25em; bottom: 1.25em; padding: 0 .9em; }
-    body:not(.viewing) .key-room { display: block; height: 1.5em; }
     .chooser { padding: 1.5em 1em; .sheets { gap: 1.2em; } }
     .buttons { gap: .5em; }
   }
@@ -602,12 +600,10 @@
       <button id="download" title="Each page as a 600 dpi picture">Export PNG</button>
       <button id="export" title="The text, as a Markdown file">Export Markdown</button>
       <button id="print" title="Print each sheet on paper of its own size">Print</button>
-      <span class="key-room"></span>
+      <button class="edit-key" hidden>Save</button>
     </div>
   </div>
 </section>
-
-<button class="edit-key" hidden>Edit</button>
 
 <div class="chooser" hidden>
   <div class="orientation">
