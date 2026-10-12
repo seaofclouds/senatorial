@@ -1,5 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
+<base href="/">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Senatorial</title>
 <meta name="description" content="Type on true-to-size sheets of paper with a real Senatorial typewriter face.">
@@ -126,28 +127,25 @@
     background: var(--body);
   }
 
-  /* SHARING — the page's link, on a slip above the keys */
-  .share {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: .5em .75em;
-    margin-bottom: 1em;
-    padding-bottom: 1em;
-    border-bottom: 1px solid hsl(30, 5%, 24%);
-    color: hsl(38, 6%, 80%);
+  .saved { font-size: .85rem; color: hsl(38, 4%, 62%); }
 
-    a {
-      margin-right: .25em;
-      color: inherit;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: .9rem;
-      overflow-wrap: anywhere;
-      text-decoration-color: hsl(38, 4%, 55%);
-      text-underline-offset: 3px;
-    }
+  /* READING — a page's link shows just the page, in the middle of the screen (or from the top, when it's taller),
+     with a key to bring up the machine */
+  body.viewing {
+    place-items: center;
+    .ui { display: none; }
+    .pages { padding: 1.5em 0; }
+  }
 
-    .status { margin-left: auto; font-size: .85rem; opacity: .7; }
+  .edit-key {
+    position: fixed;
+    right: 1.5em;
+    bottom: 1.5em;
+    z-index: 1;
+    padding: .3em 1.1em;
+    color: hsl(38, 6%, 88%);
+    background: var(--body);
+    box-shadow: 0 4px 14px #0003;
   }
 
   /* MARGIN & TAB STOPS — light tabs, rounded on the outside, pointing at exactly where each margin falls */
@@ -513,6 +511,26 @@
       color: hsl(30, 5%, 40%);
       background: hsl(40 20% 94%);
     }
+    .keep {
+      align-self: center;
+      margin-bottom: .2em;
+      padding: 0 .6em;
+      font-size: .75rem;
+      color: hsl(30, 5%, 40%);
+      background: hsl(40 20% 94%);
+    }
+
+    .forget {
+      position: absolute;
+      top: .25em;
+      left: .4em;
+      padding: 0;
+      font-size: .9rem;
+      line-height: 1;
+      color: hsl(30, 5%, 75%);
+      background: none;
+      &:hover { color: hsl(30, 5%, 40%); }
+    }
   }
 
   [type=number] {
@@ -564,25 +582,22 @@
     <textarea class="input" autofocus spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
   </div>
   <div class="ui">
-    <div class="share" hidden>
-      <a target="_blank" rel="noopener"></a>
-      <button class="copy">Copy link</button>
-      <button class="stop">Stop sharing</button>
-      <span class="status"></span>
-    </div>
     <div class="buttons">
       <button id="paper" title="Paper">Letter</button>
-      <button id="reset">Reset</button>
+      <span class="saved"></span>
+      <button id="new" title="Feed in a fresh page, at a new link">New</button>
       <button id="download" title="Save each page as a picture">Save</button>
       <button id="import" title="Open a Markdown or text file">Import</button>
       <button id="export" title="Save the text as a Markdown file">Export</button>
       <input type="file" id="importFile" accept=".md,.markdown,.txt,text/markdown,text/x-markdown,text/plain" hidden>
       <button id="print">Print</button>
-      <button id="share" title="Share a link to this page — it always shows the latest version">Share</button>
-      <button id="edit" title="Edit this page — the changes show up at this link" hidden>Edit</button>
+      <button id="share" title="Copy the link to this page — it always shows the latest version">Share</button>
+      <button id="done" title="Put the machine away, and see the page the way others do">Done</button>
     </div>
   </div>
 </section>
+
+<button class="edit-key" hidden>Edit</button>
 
 <div class="chooser" hidden>
   <div class="orientation">

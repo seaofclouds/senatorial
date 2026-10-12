@@ -848,9 +848,9 @@ input = $ ".input"
 deckElm = $ ".ui"
 formatMenu = $ ".format"
 
-# A shared page (at /s/<id>) is shown read-only, with its text built into the page
+# A page's link (/s/<id>) has the page built into it, as the server has it
 shared = window.sharedPage
-viewing = shared?
+viewing = false # reading the page, rather than typing on it
 
 pageViews = []
 renderVersion = 0
@@ -1128,6 +1128,7 @@ fmt = (v)-> +v.toFixed 2
 
 # Keep the line being typed above the machine, like paper rolling up out of the platen
 scrollCaretIntoView = ()->
+  return if viewing
   r = caretElm.getBoundingClientRect()
   limit = deckElm.getBoundingClientRect().top - 32
   if r.bottom > limit
@@ -1513,12 +1514,10 @@ load = (name, def)->
   catch
     def
 
-# A shared page being viewed is never saved over the one on your own machine
-saveText = ()->
-  try localStorage.setItem "text", input.value unless viewing
+saveText = ()-> cachePage true unless viewing
 
 save = (name, val)->
-  try localStorage.setItem name, JSON.stringify val unless viewing
+  try localStorage.setItem name, JSON.stringify val
   val
 
 settings = null
@@ -1526,7 +1525,8 @@ settings = null
 changeSettings = (changes)->
   Object.assign settings, changes
   normalize()
-  save "settings", settings
+  save "settings", settings # new pages start out on the same paper
+  saveText()
   syncControls()
   invalidate()
   publishSoon()
@@ -1560,7 +1560,7 @@ syncAlign = ()->
 
 paperName = ()->
   if settings.paper is "custom"
-    "#{fmt settings.customW} × #{fmt settings.customH}"
+    savedPaperFor(settings.customW, settings.customH)?.name ? "#{fmt settings.customW} × #{fmt settings.customH}"
   else
     papers[settings.paper].short + (if settings.landscape then " landscape" else "")
 
@@ -1576,16 +1576,6 @@ syncControls = ()->
 # Hand the keyboard back to the page after pressing a key on the machine
 for elm in document.querySelectorAll ".buttons button:not(#paper):not(#import)"
   elm.addEventListener "click", ()-> input.focus preventScroll: true
-
-$("#reset").onclick = ()->
-  return unless confirm "Clear the page and reset the machine?"
-  input.value = ""
-  reparse()
-  saveText()
-  forgetLink()
-  settings = structuredClone defaults
-  changeSettings {}
-  input.focus()
 
 # PAPER CHOOSER ###################################################################################
 
@@ -1605,45 +1595,88 @@ closeChooser = ()->
   input.focus preventScroll: true
   scrollCaretIntoView()
 
+# Custom sizes you've named are kept for next time. Picking one sets the page's own custom size, so the page keeps it
+# even for someone who doesn't have the name.
+savedPapers = load "papers", []
+savedPaperFor = (w, h)-> savedPapers.find (paper)-> paper.w is w and paper.h is h
+
 renderChooser = ()->
   for btn in chooser.querySelectorAll "[data-landscape]"
     btn.classList.toggle "active", btn.dataset.landscape is "#{settings.landscape}"
   sheets = chooser.querySelector ".sheets"
   sheets.innerHTML = ""
-  for key, paper of papers
+  addSheet = (w, h, name, dims, active, choose)->
+    sheet = document.createElement "div"
+    sheet.className = "sheet"
+    sheet.classList.add "active" if active
+    sheet.style.width = w * chooserScale + "px"
+    sheet.style.height = h * chooserScale + "px"
+    sheet.innerHTML = "<span class='name'></span><span class='dims'></span>"
+    sheet.querySelector(".name").textContent = name
+    sheet.querySelector(".dims").textContent = dims
+    sheet.onclick = ()->
+      choose()
+      closeChooser()
+    sheets.append sheet
+    sheet
+
+  for key, paper of papers when key isnt "custom"
     do (key)->
-      [w, h] = if key is "custom" then [settings.customW, settings.customH] else [paper.w, paper.h]
-      [w, h] = [h, w] if settings.landscape and key isnt "custom"
-      sheet = document.createElement "div"
-      sheet.className = "sheet"
-      sheet.classList.add "active" if key is settings.paper
-      sheet.style.width = w * chooserScale + "px"
-      sheet.style.height = h * chooserScale + "px"
-      dims = if key is "custom" then "inches" else paper.name.split(" — ")[1]
-      sheet.innerHTML = "<span class='name'>#{paper.short}</span><span class='dims'>#{dims}</span>"
-      if key is "custom"
-        size = document.createElement "span"
-        size.className = "custom"
-        for dim in ["customW", "customH"]
-          do (dim)->
-            field = document.createElement "input"
-            field.type = "number"
-            field.step = "0.25"
-            field.min = 1
-            field.max = 30
-            field.value = settings[dim]
-            field.onclick = (e)-> e.stopPropagation()
-            field.onchange = ()->
-              unless field.value is "" or isNaN +field.value
-                Object.assign settings, "#{dim}": +field.value
-                changeSettings paper: "custom"
-            size.append field
-            size.append " × " if dim is "customW"
-        sheet.append size
-      sheet.onclick = ()->
-        changeSettings paper: key
-        closeChooser()
-      sheets.append sheet
+      [w, h] = if settings.landscape then [paper.h, paper.w] else [paper.w, paper.h]
+      addSheet w, h, paper.short, paper.name.split(" — ")[1], key is settings.paper, ()-> changeSettings paper: key
+
+  custom = settings.paper is "custom"
+  for paper in savedPapers
+    do (paper)->
+      sheet = addSheet paper.w, paper.h, paper.name, "#{fmt paper.w} × #{fmt paper.h}",
+        custom and settings.customW is paper.w and settings.customH is paper.h,
+        ()-> changeSettings paper: "custom", customW: paper.w, customH: paper.h
+      forget = document.createElement "button"
+      forget.className = "forget"
+      forget.title = "Forget this size"
+      forget.textContent = "×"
+      forget.onclick = (e)->
+        e.stopPropagation()
+        savedPapers.splice savedPapers.indexOf(paper), 1
+        save "papers", savedPapers
+        syncControls()
+      sheet.append forget
+
+  saved = savedPaperFor settings.customW, settings.customH
+  sheet = addSheet settings.customW, settings.customH, "Custom", "inches", custom and not saved?, ()->
+    changeSettings paper: "custom"
+  size = document.createElement "span"
+  size.className = "custom"
+  for dim in ["customW", "customH"]
+    do (dim)->
+      field = document.createElement "input"
+      field.type = "number"
+      field.step = "0.25"
+      field.min = 1
+      field.max = 30
+      field.value = settings[dim]
+      field.onclick = (e)-> e.stopPropagation()
+      field.onchange = ()->
+        unless field.value is "" or isNaN +field.value
+          Object.assign settings, "#{dim}": +field.value
+          changeSettings paper: "custom"
+      size.append field
+      size.append " × " if dim is "customW"
+  sheet.append size
+  # Name the size to keep it on the desk
+  unless saved?
+    keep = document.createElement "button"
+    keep.className = "keep"
+    keep.textContent = "Save size"
+    keep.onclick = (e)->
+      e.stopPropagation()
+      {customW: w, customH: h} = settings
+      name = prompt "Name this paper size:", "#{fmt w} × #{fmt h}"
+      return unless name?.trim()
+      savedPapers.push {name: name.trim(), w, h}
+      save "papers", savedPapers
+      changeSettings paper: "custom"
+    sheet.append keep
   null
 
 for btn in chooser.querySelectorAll "[data-landscape]"
@@ -1902,7 +1935,7 @@ input.addEventListener "keydown", (e)->
 input.addEventListener "input", (e)->
   reparse()
   saveText()
-  rebind e.inputType
+  syncTitle()
   publishSoon()
   render()
   followCaret() unless applying # A rewrite puts the selection back itself, and decides whether to follow it
@@ -2019,76 +2052,131 @@ pagesElm.addEventListener "pointercancel", ()->
 
 window.addEventListener "resize", ()-> render()
 
-# SHARING #########################################################################################
+# PAGES & LINKS ###################################################################################
 
-# Share hands out a short link to the page: read-only, and always the latest version, since every change is
-# published to it a moment after it's made. The link belongs to the page that was on the machine when it was made —
-# importing another page, or resetting the machine, stops publishing to it (and Undo picks it back up).
-# This browser keeps the key to each page it has shared, so opening one of your own links offers to edit it.
+# Every page lives at its own link, /s/<id>, and is saved there as it's typed, so it's always ready to share. Anyone
+# with the link sees the page as it stands, read-only. The browser that made a page keeps its key and can edit it:
+# Edit brings up the machine, and Done puts it away again. Anyone else's Edit makes them a copy of their own.
+# Visiting the site itself goes back to the page you were last working on, or feeds in a fresh one.
 
+editKey = $ ".edit-key"
 shareKey = $ "#share"
-editKey = $ "#edit"
-shareSlip = $ ".share"
-shareLink = shareSlip.querySelector "a"
-copyKey = shareSlip.querySelector ".copy"
-shareStatus = shareSlip.querySelector ".status"
+savedLabel = $ ".saved"
 
-shares = load "shares", {} # id → key, for each page shared from here
-sharing = load "sharing", null # the link the page on the machine publishes to
-sharing = null unless shares[sharing]?
-published = null # what the link was last sent, so an unchanged page isn't sent again
+shares = load "shares", {} # id → key, for each page made here
+pageId = null # the page on the machine
+pageUpdated = null # when the server's copy of it last changed, as far as we know
+published = null # what the server was last sent, so an unchanged page isn't sent again
+pageMissing = false # a link with no page behind it
 publishTimer = null
 publishing = false
 publishAgain = false
-swap = null # the last import, so undoing it can put back the link the page had before
 
-shareUrl = (id)-> "#{location.origin}/s/#{id}"
 randomString = (n, alphabet)-> (alphabet[v % alphabet.length] for v in crypto.getRandomValues new Uint32Array n).join ""
-shareBody = ()-> JSON.stringify markdown: input.value, settings: settings
-pageTitle = ()-> (doc.text.split(/[\n\f]/).find((line)-> line.trim()) ? "Senatorial").replace(/[\u001F ]/g, " ").trim()
+pageUrl = (id)-> "#{location.origin}/s/#{id}"
+pageBody = ()-> JSON.stringify markdown: input.value, settings: settings
+pageTitle = ()-> (doc.text.split(/[\n\f]/).find((line)-> line.trim()) ? "").replace(/[\u001F ]/g, " ").trim()
+owns = (id)-> id? and shares[id]?
 
-attach = (id)->
-  sharing = id
-  published = null
-  save "sharing", sharing
-  syncShareKey()
+# A new page, with a key only this browser has
+makePage = ()->
+  id = randomString 10, "abcdefghjkmnpqrstuvwxyz23456789"
+  shares[id] = randomString 32, "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789"
+  save "shares", shares
+  id
 
-forgetLink = ()->
-  attach null
-  swap = null
+# Each page you make is also kept here, so nothing's lost if it can't reach the server for a while.
+# pending means it has changes the server hasn't got yet.
+cachePage = (pending)->
+  save "page:#{pageId}", {markdown: input.value, settings, pending} if owns pageId
+cachedPage = (id)-> load "page:#{id}", null
 
-syncShareKey = ()->
-  shareKey.textContent = if sharing? then "Shared" else "Share"
-  shareKey.classList.toggle "active", sharing?
-  shareSlip.hidden = true unless sharing?
-  return unless sharing?
-  shareLink.href = shareUrl sharing
-  shareLink.textContent = shareUrl(sharing).replace /^https?:\/\//, ""
+# Put a page on the machine
+loadPage = (id, page)->
+  pageId = id
+  pageUpdated = page.updated ? null
+  settings = Object.assign structuredClone(defaults), page.settings
+  normalize()
+  input.value = page.markdown ? ""
+  reparse()
+  published = if page.pending then null else pageBody()
+  syncControls()
+  syncTitle()
+  invalidate()
 
-# Undoing an import (or redoing it) puts back the link the page had
-rebind = (inputType)->
-  return unless swap? and inputType in ["historyUndo", "historyRedo"]
-  for [from, to] in [[swap.after, swap.before], [swap.before, swap.after]]
-    if input.value is to.text and sharing is from.sharing
-      attach if shares[to.sharing]? then to.sharing else null
-      changeSettings to.settings if to.settings?
-      return
+syncTitle = ()->
+  title = pageTitle()
+  document.title = if title then "#{title} — Senatorial" else "Senatorial"
 
+# Reading a page, or typing on it
+setMode = (edit)->
+  viewing = not edit
+  document.body.classList.toggle "viewing", viewing
+  input.readOnly = viewing
+  caretElm.hidden = viewing
+  gutterL = if viewing then 16 else 64
+  editKey.textContent = if owns pageId then "Edit" else "Edit a copy"
+  editKey.hidden = not viewing or (pageMissing and not owns pageId)
+  if viewing
+    formatMenu.hidden = true
+    showTools null
+    input.blur()
+    render()
+    slideCarriage 0
+  else
+    save "current", pageId
+    render()
+    input.focus preventScroll: true
+    setSelection layout.n, layout.n
+    updateFocus()
+
+editKey.onclick = ()->
+  if owns pageId
+    # Changes made in another window that haven't reached the server yet
+    cached = cachedPage pageId
+    loadPage pageId, cached if cached?.pending
+  else
+    # Someone else's page: make a copy of your own, at its own link
+    copy = {markdown: input.value, settings: structuredClone(settings), pending: true}
+    id = makePage()
+    history.pushState null, "", "/s/#{id}"
+    loadPage id, copy
+    cachePage true
+    publish()
+  setMode true
+
+$("#done").onclick = ()->
+  publish()
+  setMode false
+
+# A fresh sheet, at a new link. The page that was on the machine stays at its own.
+$("#new").onclick = ()->
+  publish()
+  id = makePage()
+  history.pushState null, "", "/s/#{id}"
+  loadPage id, {markdown: "", settings: structuredClone(settings), pending: true}
+  cachePage true
+  setMode true
+
+# Back & forward go between pages
+window.addEventListener "popstate", ()-> location.reload()
+
+# Changes reach the server a moment after they're made
 publishSoon = ()->
-  return unless sharing?
+  return unless owns(pageId) and not viewing
   clearTimeout publishTimer
   publishTimer = setTimeout publish, 1500
 
 publish = ()->
   clearTimeout publishTimer
   publishTimer = null
-  return unless sharing?
+  return unless owns pageId
   return publishAgain = true if publishing
-  body = shareBody()
+  body = pageBody()
   return if body is published
-  id = sharing
+  id = pageId
   publishing = true
-  shareStatus.textContent = "Saving…"
+  savedLabel.textContent = "Saving…"
   try
     res = await fetch "/api/shares/#{id}",
       method: "PUT"
@@ -2098,110 +2186,48 @@ publish = ()->
   catch
     res = null
   publishing = false
-  if id is sharing
+  if id is pageId
     if res?.ok
       published = body
-      shareStatus.textContent = "Up to date"
-    else if res?.status is 403
-      forgetLink()
+      pageUpdated = (await res.json()).updated
+      cachePage false if body is pageBody()
+      savedLabel.textContent = "Up to date"
     else
-      shareStatus.textContent = "Not saved yet — trying again"
-      publishTimer = setTimeout publish, 10000
+      savedLabel.textContent = if res?.status is 403 then "Can't save this page" else "Offline — will keep trying"
+      publishTimer = setTimeout publish, 10000 unless res?.status is 403
   if publishAgain
     publishAgain = false
     publish()
 
 document.addEventListener "visibilitychange", ()-> publish() if document.hidden and publishTimer?
 
-copyLink = ()->
-  try
-    await navigator.clipboard.writeText shareUrl sharing
-    copyKey.textContent = "Copied"
-    setTimeout (()-> copyKey.textContent = "Copy link"), 2000
-  catch
-    null
-
-# The first press makes the link (and copies it, or brings up the share sheet on a phone). After that, the key
-# shows the link, or puts it away again.
+# Share copies the page's link, or brings up the share sheet on a phone
 shareKey.onclick = ()->
-  if sharing? and not shareSlip.hidden
-    shareSlip.hidden = true
-    return
-  unless sharing?
-    id = randomString 10, "abcdefghjkmnpqrstuvwxyz23456789"
-    shares[id] = randomString 32, "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789"
-    save "shares", shares
-    attach id
-    publish()
-  shareSlip.hidden = false
+  publish()
+  url = pageUrl pageId
   if navigator.share? and matchMedia("(pointer: coarse)").matches
-    navigator.share(url: shareUrl(sharing), title: pageTitle()).catch ()-> null
-  else
-    copyLink()
-
-copyKey.onclick = copyLink
-
-shareSlip.querySelector(".stop").onclick = ()->
-  id = sharing
-  return unless id? and confirm "Stop sharing this page? Its link will stop working."
+    navigator.share(url: url, title: pageTitle() or "Senatorial").catch ()-> null
+    return
   try
-    res = await fetch "/api/shares/#{id}", method: "DELETE", headers: {authorization: "Bearer #{shares[id]}"}
+    await navigator.clipboard.writeText url
+    shareKey.textContent = "Copied"
+    setTimeout (()-> shareKey.textContent = "Share"), 1500
   catch
-    res = null
-  unless res?.ok or res?.status is 404
-    return alert "Couldn't reach the server to stop sharing. Try again in a moment."
-  delete shares[id]
-  save "shares", shares
-  forgetLink() if sharing is id
-  input.focus preventScroll: true
+    prompt "The link to this page:", url
 
-document.addEventListener "keydown", (e)-> shareSlip.hidden = true if e.key is "Escape"
-
-# Opening one of your own links offers to edit it: the page comes back onto the machine, linked again
-editShared = (id)->
-  return unless shares[id]? and sharing isnt id
+# While reading a page, it picks up the latest version every so often, and on coming back to it
+refreshPage = ()->
+  return unless viewing and pageId? and not document.hidden
   try
-    res = await fetch "/api/shares/#{id}", cache: "no-store"
+    res = await fetch "/api/shares/#{pageId}", cache: "no-store"
   catch
-    res = null
-  if res?.status is 404
-    delete shares[id]
-    save "shares", shares
-    return alert "That page isn't shared any more."
-  return alert "Couldn't open that page. Check your connection and try again." unless res?.ok
+    return
+  return unless res.ok and viewing
   page = await res.json()
-  loadMarkdown page.markdown, {id, settings: page.settings}
-  published = shareBody()
+  loadPage pageId, page unless page.updated is pageUpdated
 
-# Viewing a shared page: it's read-only, and picks up the latest version every so often, and on coming back to it
-sharedText = (page)-> if page.missing then "->This page is no longer shared.<-" else page.markdown
-
-showShared = (page)->
-  settings = Object.assign structuredClone(defaults), page.settings
-  normalize()
-  input.value = sharedText page
-  editKey.hidden = page.missing or not shares[shared.id]?
-  reparse()
-  syncControls()
-  invalidate()
-
-refreshShared = ()->
-  return if document.hidden
-  try
-    res = await fetch "/api/shares/#{shared.id}", cache: "no-store"
-  catch
-    return
-  if res.status is 404
-    page = missing: true
-  else if res.ok
-    page = await res.json()
-  else
-    return
-  return if page.updated is shared.updated and page.missing is shared.missing
-  shared = Object.assign {id: shared.id}, page
-  showShared shared
-
-editKey.onclick = ()-> location.href = "/#edit=#{shared.id}"
+setInterval refreshPage, 30000
+document.addEventListener "visibilitychange", refreshPage
 
 # SAVE & PRINT ####################################################################################
 
@@ -2250,14 +2276,9 @@ document.addEventListener "drop", (e)->
   e.preventDefault()
   loadMarkdown await file.text()
 
-# A shared page being opened for editing brings its link & settings along (and Undo takes them back)
-loadMarkdown = (md, page = {})->
+loadMarkdown = (md)->
   return if viewing
-  before = {text: input.value, sharing, settings: (structuredClone settings if page.settings?)}
-  attach page.id ? null
   replaceRaw 0, input.value.length, md.replace /\r\n?/g, "\n"
-  changeSettings page.settings if page.settings?
-  swap = {before, after: {text: input.value, sharing, settings: (structuredClone settings if page.settings?)}}
   setSelection 0, 0, false
   slideCarriage 0
   window.scrollTo 0, 0
@@ -2279,23 +2300,13 @@ $("#print").onclick = ()->
 
 # GO ##############################################################################################
 
-if viewing
-  settings = Object.assign structuredClone(defaults), shared.settings
-  input.value = sharedText shared
-  input.readOnly = true
-  document.body.classList.add "viewing"
-  elm.hidden = true for elm in [paperKey, $("#reset"), $("#import"), shareKey, alignLever, caretElm]
-  editKey.hidden = shared.missing or not shares[shared.id]?
-else
-  settings = Object.assign structuredClone(defaults), load "settings", {}
-  input.value = (try localStorage.getItem "text") ? ""
-normalize()
-
-# Older versions kept plain text with a separate styles string. Write those out as Markdown, once.
-unless viewing or (try localStorage.getItem "format") is "markdown"
+# What was on the machine before pages had links: Markdown, or (from older versions still) plain text with a separate
+# styles string, which is written out as Markdown here
+legacyText = ()->
+  text = (try localStorage.getItem "text") ? ""
+  return text if (try localStorage.getItem "format") is "markdown"
   oldStyles = (try localStorage.getItem "styles") ? ""
   version = (try localStorage.getItem "stylesVersion") ? "1"
-  text = input.value
   oldStyles = "" unless oldStyles.length is text.length
   chars = Array.from text
   codes = for c, i in text
@@ -2303,29 +2314,39 @@ unless viewing or (try localStorage.getItem "format") is "markdown"
     v = if not oldStyles[i]? then 0 else if version is "2" then oldStyles.charCodeAt(i) - 48 else parseInt oldStyles[i], 36
     chars[i] = c.toUpperCase() if v % 24 >= 12 and c.toUpperCase().length is 1
     encodeStyle weight: weights[(v % 6) >> 1], red: (v & 1) is 1, center: v % 12 >= 6, underline: v >= 24
-  input.value = serializeBlock chars.join(""), codes.join("") + encodeStyle {}
-  saveText()
-  try localStorage.setItem "format", "markdown"
-  try localStorage.removeItem key for key in ["styles", "stylesVersion"]
+  serializeBlock chars.join(""), codes.join("") + encodeStyle {}
 
-reparse()
-
-syncControls()
-syncShareKey()
+settings = Object.assign structuredClone(defaults), load "settings", {}
+normalize()
 loadAtlases()
-render()
-if viewing
-  input.setSelectionRange 0, 0
-  renderSelection()
-  setInterval refreshShared, 30000
-  document.addEventListener "visibilitychange", refreshShared
+
+if m = location.pathname.match /^\/s\/([a-z0-9]{6,32})\/?$/
+  # A page's link: read it — or, if it's yours and has changes the server hasn't got yet, pick up where you left off
+  id = m[1]
+  cached = cachedPage id if owns id
+  if cached?.pending
+    loadPage id, cached
+  else if shared? and not shared.missing
+    loadPage id, shared
+  else if owns id
+    loadPage id, cached ? {markdown: "", settings, pending: true}
+  else
+    pageMissing = true
+    loadPage id, {markdown: "->There's no page here.<-"}
+  setMode false
+  publish()
 else
-  input.focus preventScroll: true
-  input.setSelectionRange layout.n, layout.n
-  renderSelection()
-  updateFocus()
-  followCaret()
-  publish() # anything that didn't get out before the page was last closed
-  if m = location.hash.match /^#edit=([a-z0-9]+)$/
-    history.replaceState null, "", location.pathname
-    editShared m[1]
+  # The site itself: back to the page you were last working on, or a fresh one. The first picks up whatever was on
+  # the machine before pages had links (and the link it was shared at, if it was).
+  id = load "current", null
+  id = load "sharing", null unless owns id
+  page = cachedPage id if owns id
+  unless page?
+    id = makePage() unless owns id
+    page = {markdown: legacyText(), settings, pending: true}
+    try localStorage.removeItem key for key in ["text", "format", "styles", "stylesVersion", "sharing"]
+  history.replaceState null, "", "/s/#{id}"
+  loadPage id, page
+  cachePage page.pending ? false
+  setMode true
+  publish()

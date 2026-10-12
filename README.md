@@ -13,7 +13,8 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
   done the typist's way, by striking another key over the letters. The alignment lever sets the paragraph you're in flush left, centred, or flush right.
 - The margin tabs, tab stops, and line space lever stay hidden until you point at the strip above a sheet or the margin
   to its left (on a phone, tap there).
-- The paper key, on the left of the control bar, lays out every kind of paper on the desk to feed in.
+- The paper key, on the left of the control bar, lays out every kind of paper on the desk to feed in. Type in a custom
+  size and Save size names it and keeps it on the desk for next time (× forgets it).
 - The line space lever, under the top margin tab, sets single, 1½, or double spacing.
 - ⌘/Ctrl+Enter feeds a fresh sheet. Save downloads 600 dpi PNGs; Print prints at the exact sheet size.
 
@@ -53,26 +54,28 @@ In a table, Return starts a new line inside the cell (or, at the end of the last
 Shift-Tab select the next and previous cells, Tab in the last cell adds a row, and the alignment lever sets the
 column. Columns spread out across the line when they fit, and wrap within a share of it when they don't.
 
-## Sharing
+## Every page has a link
 
-The Share key gives the page a short link (on a phone, it brings up the share sheet). Whoever opens it sees the page
-as it is on your machine — read-only, but always the latest version: every change is sent to the link a moment after
-you make it, and an open link picks it up when they come back to it. They can save, print, or export it.
+Each page lives at its own link, `/s/…`, and is saved there as you type — so whatever's on the page is always ready to
+share. Visiting the site takes you to the page you were last working on, and New feeds in a fresh one at a new link
+(Back returns to the one before). Share copies the page's link, or brings up the share sheet on a phone.
 
-The link belongs to the page that was on the machine when you shared it. Importing another page or resetting the
-machine stops sending changes to it (Undo picks it back up), and Stop sharing, on the slip the Share key opens, takes
-the link down. The browser you shared from keeps the key to the page, so opening your own link there offers an Edit
-key that brings the page back onto the machine.
+Opening a link shows just the page, in the middle of the screen, with an Edit key in the corner. On a page you made,
+Edit brings up the machine, and Done puts it away again. Anyone else sees the latest version (an open link picks up
+changes when they come back to it), and their Edit key makes them a copy of their own, at its own link.
+
+Only the browser a page was made in can change it: it keeps the page's key, and the server keeps just a hash of it.
 
 ## Running it
 
 There's no build step — `index.coffee` is compiled in the browser by `coffeescript.js`.
-Serve the folder with any static server, e.g. `npx http-server .` — or, to try sharing too,
+Pages are saved to their links by `worker.js`, so to run it all locally,
 `npx wrangler d1 migrations apply senatorial-shares --local --persist-to ../.senatorial-state` and then
 `npx wrangler dev --persist-to ../.senatorial-state` (keeping the local database outside the folder being served).
+Any static server works for just typing, e.g. `npx http-server .`, though nothing is saved to a link that way.
 
 ## Deploying
 
 Pushes to `main` deploy to the `senatorial` Cloudflare Worker via Workers Builds, using `wrangler.jsonc` to serve
-this folder as static assets, with `worker.js` handling shared pages (`/s/…`) and their API (`/api/shares/…`).
-Shared pages are kept in the `senatorial-shares` D1 database; its table is in `migrations/`.
+this folder as static assets, with `worker.js` handling pages' links (`/s/…`) and their API (`/api/shares/…`).
+Pages are kept in the `senatorial-shares` D1 database; its table is in `migrations/`.

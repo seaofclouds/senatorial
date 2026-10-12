@@ -91,7 +91,6 @@ async function sharedPage(request, env, id) {
 
   const page = await env.ASSETS.fetch(new URL("/", request.url).toString());
   const head =
-    `<base href="/">` +
     `<script>window.sharedPage = ${JSON.stringify(shared).replace(/</g, "\\u003c")}</script>` +
     `<meta property="og:type" content="article">` +
     `<meta property="og:title" content="${escapeHtml(title ?? "Senatorial")}">` +
