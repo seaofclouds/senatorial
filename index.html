@@ -19,7 +19,8 @@
     --caret: hsl(0, 80%, 45%);
   }
 
-  html { height: 100%; }
+  /* A full-size sheet is often wider than the screen. Clip it rather than letting the page zoom out to fit. */
+  html { height: 100%; overflow-x: clip; }
 
   body {
     display: grid;
@@ -28,6 +29,8 @@
     margin: 0;
     font-family: system-ui;
     background: hsl(40 20% 90%);
+    overflow-x: clip;
+    grid-template-columns: minmax(0, 1fr); /* Don't let a wide sheet stretch the machine past the screen */
   }
 
   section {
@@ -35,6 +38,7 @@
     width: 100%;
     max-width: 72em;
     padding: 1.5em .5em;
+    overflow-x: clip;
     opacity: 0;
     transition: opacity .3s;
     body.ready & { opacity: 1; }
@@ -42,13 +46,15 @@
 
   /* PAPER ******************************************************************************************/
 
+  /* Sheets are actual size. The whole stack slides sideways with the carriage when it's wider than the screen. */
   .pages {
     position: relative;
     display: flex;
     flex-flow: column;
-    align-items: center;
-    gap: 1.5em;
-    padding-bottom: 1.5em;
+    align-items: flex-start;
+    gap: 3em;
+    padding: 2em 0 1.5em;
+    transition: translate .2s ease-out;
   }
 
   .page {
@@ -113,83 +119,123 @@
     z-index: 1;
     display: flex;
     flex-flow: column;
-    gap: 1.6em;
-    padding: 0 1.5em 1.5em;
+    padding: 1em 1.5em;
     border-radius: 1em;
     background: var(--body);
   }
 
-  .scale {
-    position: relative;
-    margin: 0 auto;
-    height: 40px;
+  /* MARGIN & TAB STOPS — light arrow tabs that point at exactly where each margin falls */
+
+  /* The strip along the top of each sheet holds the left & right margins, tab stops, and carriage pointer */
+  .strip {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: 26px;
+    cursor: copy;
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
-    cursor: copy;
-    canvas { display: block; width: 100%; height: 100%; }
   }
 
-  /* Margin stops: dark pills engraved with their setting, like the old number boxes */
-  .pill {
+  .flag {
     position: absolute;
-    top: calc(100% - .5em);
-    translate: -50%;
-    min-width: 2.2em;
-    padding: 0 .35em;
-    border-radius: .2em;
-    font-size: 1rem;
-    line-height: 1.4;
+    min-width: 1.9em;
+    font-size: 11px;
+    line-height: 15px;
     text-align: center;
     font-variant-numeric: tabular-nums;
-    color: var(--engraving);
-    background: var(--well);
-    cursor: ew-resize;
+    color: hsl(30, 5%, 46%);
+    background: hsl(36, 10%, 82%);
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
-    &:hover, &.dragging { color: hsl(38, 4%, 62%); }
+    opacity: .7;
+    transition: opacity .15s, background-color .15s;
+    &:hover, &.dragging { opacity: 1; background: hsl(36, 10%, 76%); }
+    body.guides & { opacity: 1; }
   }
 
-  /* Top & bottom margin stops ride along the left edge of each sheet */
-  .vstop.pill {
-    top: auto;
-    right: 100%;
-    margin-right: .5em;
-    translate: 0 -50%;
-    cursor: ns-resize;
-    opacity: .4;
-    transition: opacity .2s;
-    .page:hover &, body.guides & { opacity: 1; }
-  }
-
-  .tab {
-    position: absolute;
-    top: 0;
-    width: 12px;
-    height: 22px;
+  /* Left & right margin tabs hang above the sheet, pointing down at the margin */
+  .flag.down {
+    bottom: 1px;
+    padding: 1px 5px 6px;
     translate: -50%;
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), 50% 100%, 0 calc(100% - 6px));
     cursor: ew-resize;
-    &::before {
-      content: '';
-      position: absolute;
-      inset: 0 4px 6px;
-      border-radius: 0 0 3px 3px;
-      background: var(--well);
-    }
-    &.removing { opacity: .3; }
   }
 
-  /* Shows where the next letter will strike, like the carriage pointer */
-  .pointer {
+  /* Top & bottom margin tabs sit off the left edge, pointing right at the margin */
+  .flag.across {
+    right: 100%;
+    margin-right: 1px;
+    padding: 1px 9px 1px 5px;
+    translate: 0 -50%;
+    clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 0 100%);
+    cursor: ns-resize;
+  }
+
+  .tabstop {
     position: absolute;
-    top: 0;
-    width: 2px;
-    height: 100%;
-    translate: -1px;
-    background: hsl(0, 70%, 45%);
-    border-radius: 0 0 2px 2px;
+    bottom: 1px;
+    width: 11px;
+    height: 9px;
+    translate: -50%;
+    background: hsl(36, 8%, 66%);
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+    cursor: ew-resize;
+    &:hover, &.dragging { background: hsl(30, 6%, 50%); }
+    &.removing { opacity: .25; }
+  }
+
+  /* With no tab stops set, Tab jumps every 5 columns — shown as faint dots */
+  .default-tab {
+    position: absolute;
+    bottom: 4px;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    translate: -50%;
+    background: hsl(36, 8%, 76%);
     pointer-events: none;
+  }
+
+  /* Shows where the next letter will strike */
+  .carriage {
+    position: absolute;
+    bottom: 0;
+    width: 2px;
+    height: 9px;
+    translate: -1px;
+    border-radius: 1px 1px 0 0;
+    background: var(--caret);
+    pointer-events: none;
+  }
+
+  /* FORMAT MENU — pops up over a selection */
+  .format {
+    position: absolute;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: .4em;
+    padding: .4em;
+    border-radius: 1em;
+    background: var(--body);
+    box-shadow: 0 4px 14px #0003;
+    white-space: nowrap;
+
+    button { font-size: .9rem; }
+
+    .red {
+      width: 1.5em;
+      height: 1.5em;
+      padding: 0;
+      border-radius: 50%;
+      background: hsl(0, 45%, 32%);
+      &.active { background: hsl(360, 100%, 40%); box-shadow: 0 0 0 2px hsl(18, 2%, 56%); }
+    }
   }
 
   .buttons {
@@ -412,10 +458,9 @@
   }
 
   @media (max-width: 700px) {
-    .ui { bottom: .5em; padding: 0 .75em .75em; gap: 1.4em; }
+    .ui { bottom: .5em; padding: .75em; }
     .chooser { padding: 1.5em 1em; .sheets { gap: 1.2em; } }
     .buttons { gap: .5em; }
-    .vstop.pill { margin-right: .1em; font-size: .8rem; min-width: 1.8em; }
   }
 </style>
 
@@ -423,17 +468,21 @@
   <div class="pages">
     <div class="selection"></div>
     <div class="caret"></div>
+    <div class="format" hidden>
+      <button data-weight="regular">Regular</button>
+      <button data-weight="light">Light</button>
+      <button data-weight="double">Double Struck</button>
+      <button class="red" data-red title="Red ribbon"></button>
+    </div>
     <textarea class="input" autofocus spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
   </div>
   <div class="ui">
-    <div class="scale"><canvas></canvas><div class="pointer"></div></div>
     <div class="buttons">
       <button id="regular" class="active">Regular</button>
       <button id="light">Light</button>
       <button id="double">Double Struck</button>
       <input type="checkbox" id="red" class="toggle spacer" role="switch" title="Red ribbon">
       <div class="lever" id="spacing" title="Line spacing"><span class="knob"></span></div>
-      <button id="clearTabs" title="Clear all tab stops">Tab Clear</button>
       <button id="reset">Reset</button>
       <button id="download">Save</button>
       <button id="print">Print</button>

@@ -5,7 +5,6 @@ charactersPerInch = 11 # this is based on the actual typewriter
 linesPerInch = 6 # standard typewriter line feed — single spacing is 1/6"
 atlasDPI = 1200 # ROUGHLY — this is based on the glyph scan Todd sent me
 exportDPI = 600 # Resolution of saved & printed pages. Change it to whatever you want, and everything Just Works™
-cssDPI = 96 # CSS pixels per inch at 100% zoom
 
 # PAPER ###########################################################################################
 
@@ -116,18 +115,32 @@ glyph = (c)->
     [gx, gy] = getGlyphPosInAtlas "*" unless gx? and gy?
     [gx, gy]
 
-# This image stores the currently-loaded glyph atlas
-atlasImg = null
+# Every character remembers how it was struck: regular, light, or double struck, on the black or red half of the ribbon.
+# Styles are kept as a string with one digit per character, running alongside the text.
+weights = ["regular", "light", "double"]
+styleCode = (weight, red)-> String weights.indexOf(weight) * 2 + (if red then 1 else 0)
+styleWeight = (code)-> weights[+code >> 1]
+styleRed = (code)-> (+code & 1) is 1
 
-loadAtlas = ()->
-  src = settings.atlas + (if settings.red then "-red" else "")
-  src = "regular-red" if src is "double-red"
-  img = new Image()
-  img.src = "glyphs/#{src}.png"
-  img.onload = ()->
-    atlasImg = img
-    invalidate()
-    document.body.classList.add "ready"
+# These images store the glyph atlases, one per strike & ribbon colour
+atlases = {}
+atlasNames = ["regular", "light", "double", "regular-red", "light-red"]
+
+atlasFor = (code)->
+  name = styleWeight(code) + (if styleRed code then "-red" else "")
+  name = "regular-red" if name is "double-red" # There's no red double struck scan
+  atlases[name]
+
+loadAtlases = ()->
+  loaded = 0
+  for name in atlasNames
+    do (name)->
+      img = new Image()
+      img.onload = ()->
+        atlases[name] = img
+        invalidate()
+        document.body.classList.add "ready" if ++loaded is atlasNames.length
+      img.src = "glyphs/#{name}.png"
 
 # LAYOUT ##########################################################################################
 
@@ -231,33 +244,35 @@ indexAtPoint = (g, page, x, y)->
 
 $ = (q)-> document.querySelector q
 
-section = $ "section"
 pagesElm = $ ".pages"
 selectionElm = $ ".selection"
 caretElm = $ ".caret"
 input = $ ".input"
-scaleElm = $ ".scale"
-scaleCanvas = $ ".scale canvas"
-scaleCtx = scaleCanvas.getContext "2d"
-pointerElm = $ ".pointer"
+deckElm = $ ".ui"
+formatMenu = $ ".format"
+
+# The carriage pointer, which rides along the top of whichever sheet you're typing on
+carriageElm = document.createElement "div"
+carriageElm.className = "carriage"
 
 pageViews = []
 renderVersion = 0
 geo = null
-pxPerInch = cssDPI
+styles = "" # one style digit per character of the text — see styleCode
 
-# Settings changed or the atlas loaded, so every page needs to be redrawn
+# Sheets are shown at actual size, so the type reads the way it would on the desk.
+# A CSS inch isn't a real inch (it's about ⅗" on a phone), so this uses typical real screen densities instead.
+actualSize = ()->
+  if matchMedia("(pointer: coarse)").matches
+    if Math.min(screen.width, screen.height) < 600 then 155 else 130 # phones, then tablets
+  else
+    120 # laptops & desktop monitors
+pxPerInch = actualSize()
+
+# Settings changed or the atlases loaded, so every page needs to be redrawn
 invalidate = ()->
   renderVersion++
   render()
-
-# Every sheet is shown at the same scale — a letter-width sheet fills the machine,
-# and smaller sheets (like index cards) look smaller, just like they would in the carriage
-widestUsualSheet = 8.5
-currentZoom = (g)->
-  gutter = if window.innerWidth < 700 then 40 else 128
-  available = section.clientWidth - gutter
-  available / (Math.max(g.w, widestUsualSheet) * cssDPI)
 
 makePageView = ()->
   elm = document.createElement "div"
@@ -269,21 +284,22 @@ makePageView = ()->
   label.className = "paper-label"
   label.title = "Change paper"
   label.onclick = openChooser
+  strip = document.createElement "div"
+  strip.className = "strip"
   top = document.createElement "div"
-  top.className = "pill vstop"
+  top.className = "flag across vstop"
   top.dataset.kind = "top"
   bottom = document.createElement "div"
-  bottom.className = "pill vstop"
+  bottom.className = "flag across vstop"
   bottom.dataset.kind = "bottom"
-  elm.append canvas, guide, label, top, bottom
+  elm.append canvas, guide, label, strip, top, bottom
   pagesElm.insertBefore elm, selectionElm
-  {elm, canvas, guide, label, top, bottom, ctx: canvas.getContext("2d"), key: null}
+  {elm, canvas, guide, label, strip, top, bottom, ctx: canvas.getContext("2d"), key: null}
 
 render = ()->
   return unless settings?
   geo = g = geometry()
   doLayout g
-  pxPerInch = cssDPI * currentZoom g
   cssW = g.w * pxPerInch
   cssH = g.h * pxPerInch
   dpr = window.devicePixelRatio or 1
@@ -316,15 +332,15 @@ render = ()->
     view.bottom.style.top = (g.h - g.bottom / linesPerInch) * pxPerInch + "px"
     view.bottom.textContent = g.bottom
     view.bottom.title = "Bottom margin: #{g.bottom} lines (#{fmt g.bottom / linesPerInch} in) · #{g.linesPerPage} lines per page"
+    renderStrip view, g
 
     # Only redraw pages whose contents actually changed
     {start, end} = layout.pages[p]
-    key = "#{renderVersion}|#{pw}|#{layout.text.slice start, end}"
+    key = "#{renderVersion}|#{pw}|#{layout.text.slice start, end}|#{styles.slice start, end}"
     unless view.key is key
       view.key = key
       drawPage view.ctx, p, pw / g.w
 
-  drawScale g, cssW
   renderSelection()
 
 # Draw one page onto a canvas, at the given pixels per inch (screen, or exportDPI for saving)
@@ -333,7 +349,6 @@ drawPage = (ctx, p, ppi)->
   ctx.globalCompositeOperation = "source-over"
   ctx.fillStyle = "#fff"
   ctx.fillRect 0, 0, ctx.canvas.width, ctx.canvas.height
-  return unless atlasImg?
 
   s = ppi / atlasDPI
   ctx.setTransform s, 0, 0, s, 0, 0
@@ -347,63 +362,45 @@ drawPage = (ctx, p, ppi)->
   for i in [start...Math.min end, layout.n]
     c = text[i]
     continue if c in [" ", "\n", "\t", "\f"]
+    img = atlasFor styles[i]
+    continue unless img?
     [gx, gy] = glyph c
     [_, line, col] = layout.pos[i]
     px = col * gw
     py = lineTop(geo, line) * atlasDPI + verticalAlign
-    ctx.drawImage atlasImg, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
+    ctx.drawImage img, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
   null
 
-# The scale runs across the sheet, one tick per column, just like the typewriter's paper scale
-drawScale = (g, cssW)->
-  dpr = window.devicePixelRatio or 1
-  cssH = scaleElm.offsetHeight
-  scaleElm.style.width = cssW + "px"
-  scaleCanvas.width = Math.round cssW * dpr
-  scaleCanvas.height = Math.round cssH * dpr
-  ctx = scaleCtx
-  ctx.setTransform dpr, 0, 0, dpr, 0, 0
-  ctx.clearRect 0, 0, cssW, cssH
-  step = cssW / (g.w * charactersPerInch)
+# Along the top of each sheet: the left & right margin tabs, the tab stops, and the carriage pointer
+renderStrip = (view, g)->
+  step = pxPerInch / charactersPerInch
+  marks = [
+    {kind: "left", col: g.left, title: "Left margin at #{g.left} (#{fmt g.left / charactersPerInch} in)"}
+    {kind: "right", col: g.right, title: "Right margin at #{g.right} (#{fmt (g.cols - g.right) / charactersPerInch} in from the edge) · #{g.right - g.left} characters per line"}
+  ]
+  for col, index in settings.tabs
+    marks.push {kind: "tab", col, index, title: "Tab stop at #{col} — drag it away to clear it"}
+  unless settings.tabs.length
+    marks.push {kind: "default", col} for col in defaultTabs g
 
-  # The space between the margins is outlined, like the original scale
-  ctx.beginPath()
-  ctx.roundRect g.left * step, -6, (g.right - g.left) * step, cssH + 6, 5
-  ctx.strokeStyle = "hsl(18, 4%, 19%)"
-  ctx.lineWidth = 2
-  ctx.stroke()
-
-  for i in [0..g.cols]
-    continue if i is g.left or i is g.right
-    continue if step < 4 and i % 5 isnt 0
-    ctx.fillStyle =
-      if not (g.left < i < g.right) then "hsl(18, 4%, 25%)"
-      else if i % 10 is 0 then "hsl(18, 2%, 55%)"
-      else "hsl(18, 2%, 45%)"
-    height = if i % 10 is 0 then 17 else if i % 5 is 0 then 12 else 7
-    ctx.fillRect Math.round(i * step) - 1, 0, 2, height
-
-  # Sync the draggable stops: two margin pills and a notch for each tab stop
-  stops = [{kind: "left", col: g.left}, {kind: "right", col: g.right}]
-  stops.push {kind: "tab", col, index} for col, index in settings.tabs
-  elms = Array.from scaleElm.querySelectorAll ".pill, .tab"
-  while elms.length < stops.length
+  elms = Array.from view.strip.querySelectorAll ".mark"
+  while elms.length < marks.length
     elms.push e = document.createElement "div"
-    scaleElm.append e
-  e.remove() for e in elms.splice stops.length
-  for stop, k in stops
+    view.strip.append e
+  e.remove() for e in elms.splice marks.length
+  for mark, k in marks
     e = elms[k]
-    e.className = if stop.kind is "tab" then "tab" else "pill"
-    e.classList.toggle "removing", drag?.kind is "tab" and drag.index is stop.index and drag.removing
-    e.classList.toggle "dragging", drag?.kind is stop.kind
-    e.dataset.kind = stop.kind
-    e.dataset.index = stop.index ? ""
-    e.style.left = stop.col * step + "px"
-    e.textContent = if stop.kind is "tab" then "" else stop.col
-    e.title =
-      if stop.kind is "tab" then "Tab stop at #{stop.col} — drag it off the scale to clear it"
-      else if stop.kind is "left" then "Left margin at #{stop.col} (#{fmt stop.col / charactersPerInch} in)"
-      else "Right margin at #{stop.col} (#{fmt (g.cols - stop.col) / charactersPerInch} in from the edge) · #{g.right - g.left} characters per line"
+    e.className = "mark " + switch mark.kind
+      when "left", "right" then "flag down"
+      when "tab" then "tabstop"
+      else "default-tab"
+    e.classList.toggle "removing", drag?.kind is "tab" and drag.index is mark.index and drag.removing
+    e.classList.toggle "dragging", drag?.kind is mark.kind and (mark.kind isnt "tab" or drag.index is mark.index)
+    e.dataset.kind = mark.kind
+    e.dataset.index = mark.index ? ""
+    e.style.left = mark.col * step + "px"
+    e.textContent = if mark.kind in ["left", "right"] then mark.col else ""
+    e.title = mark.title ? ""
   null
 
 # Caret position for index i, in CSS px relative to the .pages container
@@ -414,19 +411,26 @@ caretPoint = (i)->
   y: view.elm.offsetTop + lineTop(geo, line) * pxPerInch
   h: pxPerInch / linesPerInch
 
+focusIndex = ()->
+  Math.min (if input.selectionDirection is "backward" then input.selectionStart else input.selectionEnd), layout.n
+
 renderSelection = ()->
   return unless layout? and pageViews.length
   a = input.selectionStart
   b = input.selectionEnd
 
   # Caret goes on the moving end of the selection
-  focus = Math.min (if input.selectionDirection is "backward" then a else b), layout.n
+  focus = focusIndex()
   c = caretPoint focus
   Object.assign caretElm.style, left: c.x - 1 + "px", top: c.y + "px", height: c.h + "px"
   Object.assign input.style, left: c.x + "px", top: c.y + "px", height: c.h + "px"
 
-  # The pointer on the scale follows the carriage
-  pointerElm.style.left = layout.pos[focus][2] / charactersPerInch * pxPerInch + "px"
+  # The carriage pointer rides along the top of the sheet you're typing on
+  [page, _, col] = layout.pos[focus]
+  strip = pageViews[page].strip
+  strip.append carriageElm unless carriageElm.parentNode is strip
+  carriageElm.style.left = col / charactersPerInch * pxPerInch + "px"
+  moveCarriage col
 
   # Restart the blink so the caret is visible while it's moving
   caretElm.style.animation = "none"
@@ -445,10 +449,103 @@ renderSelection = ()->
       x1 = if last + 1 <= ln.end then caretPoint(last + 1).x else caretPoint(last).x + pxPerInch / charactersPerInch
       rects.push "<div style='left:#{p0.x}px;top:#{p0.y}px;width:#{Math.max 2, x1 - p0.x}px;height:#{p0.h}px'></div>"
   selectionElm.innerHTML = rects.join ""
+  renderFormatMenu()
+
+# When the sheet is wider than the screen, it slides side to side to keep the strike point in view, like a carriage
+moveCarriage = (col)->
+  avail = pagesElm.clientWidth
+  sheetW = geo.w * pxPerInch
+  gutterL = 56 # room for the top & bottom margin tabs
+  gutterR = 16
+  tx =
+    if sheetW + gutterL + gutterR <= avail
+      (avail - sheetW) / 2
+    else
+      clamp avail / 2 - col / charactersPerInch * pxPerInch, avail - sheetW - gutterR, gutterL
+  carriageX = Math.round tx
+  pagesElm.style.translate = "#{carriageX}px"
+
+carriageX = 0
 
 fmt = (v)-> +v.toFixed 2
 
-scrollCaretIntoView = ()-> caretElm.scrollIntoView block: "nearest", inline: "nearest"
+# Keep the line being typed above the machine, like paper rolling up out of the platen
+scrollCaretIntoView = ()->
+  r = caretElm.getBoundingClientRect()
+  limit = deckElm.getBoundingClientRect().top - 32
+  if r.bottom > limit
+    window.scrollBy 0, r.bottom - limit
+  else if r.top < 48
+    window.scrollBy 0, r.top - 48
+
+# STYLES ##########################################################################################
+
+saveStyles = ()->
+  try localStorage.setItem "styles", styles
+
+typingStyle = ()-> styleCode settings.atlas, settings.red
+
+# Keep the styles lined up with the text after every edit. The edit can't begin after where the
+# selection started, which pins down where a repeated letter was inserted.
+lastText = ""
+editStart = 0
+input.addEventListener "beforeinput", ()-> editStart = input.selectionStart
+
+syncStyles = ()->
+  text = input.value
+  old = lastText
+  limit = Math.min old.length, text.length, editStart
+  p = 0
+  p++ while p < limit and old[p] is text[p]
+  s = 0
+  s++ while s < Math.min(old.length, text.length) - p and old[old.length - 1 - s] is text[text.length - 1 - s]
+  inserted = text.length - p - s
+  styles = styles.slice(0, p) + typingStyle().repeat(inserted) + styles.slice(old.length - s)
+  lastText = text
+  saveStyles()
+
+# Restyle the selected characters
+restyle = (fn)->
+  a = input.selectionStart
+  b = input.selectionEnd
+  return false unless a < b
+  styles = styles.slice(0, a) + (fn c for c in styles.slice a, b).join("") + styles.slice(b)
+  saveStyles()
+  render()
+  true
+
+setWeight = (weight)-> restyle (c)-> styleCode weight, styleRed c
+setRed = (red)-> restyle (c)-> styleCode styleWeight(c), red
+
+# A little menu that pops up over a selection, for striking it differently
+renderFormatMenu = ()->
+  a = input.selectionStart
+  b = input.selectionEnd
+  show = a < b and not pointer? and document.activeElement is input
+  formatMenu.hidden = not show
+  return unless show
+
+  sel = styles.slice a, b
+  for btn in formatMenu.querySelectorAll "[data-weight]"
+    btn.classList.toggle "active", Array.from(sel).every (c)-> styleWeight(c) is btn.dataset.weight
+  allRed = Array.from(sel).every styleRed
+  formatMenu.querySelector("[data-red]").classList.toggle "active", allRed
+
+  first = caretPoint a
+  menuH = formatMenu.offsetHeight
+  pageTop = pageViews[layout.pos[a][0]].elm.offsetTop
+  top = if first.y - menuH - 10 > pageTop then first.y - menuH - 10 else caretPoint(Math.max a, b - 1).y + first.h + 10
+  # Keep it on screen, wherever the carriage has slid to
+  left = clamp first.x, 8 - carriageX, pagesElm.clientWidth - carriageX - formatMenu.offsetWidth - 8
+  Object.assign formatMenu.style, left: left + "px", top: top + "px"
+
+for btn in formatMenu.querySelectorAll "button"
+  btn.addEventListener "pointerdown", (e)-> e.preventDefault() # Keep the selection while choosing
+  do (btn)-> btn.onclick = ()->
+    if btn.dataset.weight?
+      setWeight btn.dataset.weight
+    else
+      setRed not btn.classList.contains "active"
 
 # SETTINGS ########################################################################################
 
@@ -471,7 +568,6 @@ changeSettings = (changes)->
   Object.assign settings, changes
   normalize()
   save "settings", settings
-  loadAtlas() if changes.atlas? or changes.red?
   syncControls()
   invalidate()
 
@@ -490,9 +586,9 @@ normalize = ()->
 spacings = [1, 1.5, 2]
 
 controls = {}
-controls[id] = $ "#" + id for id in ["spacing", "red", "customW", "customH"]
+controls[id] = $ "#" + id for id in ["spacing", "red"]
 atlasBtns = {}
-atlasBtns[id] = $ "#" + id for id in ["regular", "light", "double"]
+atlasBtns[id] = $ "#" + id for id in weights
 chooser = $ ".chooser"
 
 # Engrave each lever position with three little lines, spaced the way that setting feeds the paper
@@ -521,10 +617,14 @@ syncControls = ()->
   renderChooser() unless chooser.hidden
   null
 
+# The strike & ribbon keys set how new letters are typed — and restyle the selection, if there is one
 for name, btn of atlasBtns
-  do (name)-> btn.onclick = ()-> changeSettings atlas: name
-controls.red.onchange = ()-> changeSettings red: controls.red.checked
-$("#clearTabs").onclick = ()-> changeSettings tabs: []
+  do (name)-> btn.onclick = ()->
+    setWeight name
+    changeSettings atlas: name
+controls.red.onchange = ()->
+  setRed controls.red.checked
+  changeSettings red: controls.red.checked
 
 # Hand the keyboard back to the page after pressing a key on the machine
 for elm in document.querySelectorAll ".buttons button, .toggle"
@@ -532,11 +632,11 @@ for elm in document.querySelectorAll ".buttons button, .toggle"
 
 $("#reset").onclick = ()->
   return unless confirm "Clear the page and reset the machine?"
-  input.value = ""
+  input.value = lastText = styles = ""
   saveText()
+  saveStyles()
   settings = structuredClone defaults
   changeSettings {}
-  loadAtlas()
   input.focus()
 
 # PAPER CHOOSER ###################################################################################
@@ -608,83 +708,75 @@ document.addEventListener "keydown", (e)-> closeChooser() if e.key is "Escape" a
 
 # STOPS ###########################################################################################
 
-# Margin & tab stops are set the way you would on the machine: drag the stops along the scale,
-# click the scale to set a tab, and pull a tab off the scale to clear it.
-# The top & bottom margin stops sit along the left edge of each sheet.
+# Margins & tab stops are set right on the sheet. The left & right margin tabs and the tab stops sit
+# along the top edge: drag them, click the strip to set a tab, and pull a tab away to clear it.
+# The top & bottom margin tabs sit along the left edge.
 
 drag = null
 
 showGuides = (show)-> document.body.classList.toggle "guides", show
-scaleElm.onpointerenter = ()-> showGuides true
-scaleElm.onpointerleave = ()-> showGuides drag?
 
-scaleCol = (e)->
-  rect = scaleElm.getBoundingClientRect()
-  Math.round (e.clientX - rect.left) / rect.width * geo.w * charactersPerInch
+pagesElm.addEventListener "pointerover", (e)-> showGuides true if e.target.closest ".strip, .vstop"
+pagesElm.addEventListener "pointerout", (e)-> showGuides drag? if e.target.closest ".strip, .vstop"
 
-scaleElm.onpointerdown = (e)->
+colAt = (page, e)->
+  rect = page.getBoundingClientRect()
+  Math.round (e.clientX - rect.left) / pxPerInch * charactersPerInch
+
+lineAt = (page, e)->
+  rect = page.getBoundingClientRect()
+  Math.round (e.clientY - rect.top) / pxPerInch * linesPerInch
+
+startDrag = (e, handle, d)->
   e.preventDefault()
-  col = scaleCol e
-  stop = e.target.closest ".pill, .tab"
-  if stop?
-    drag = kind: stop.dataset.kind, index: +stop.dataset.index
-  else
-    # Clicking on an empty part of the scale sets a new tab stop
-    return unless geo.left < col < geo.right
-    tabs = settings.tabs.concat col
-    changeSettings {tabs}
-    drag = kind: "tab", index: settings.tabs.indexOf col
+  e.stopPropagation()
+  drag = d
   drag.y = e.clientY
   showGuides true
-  scaleElm.setPointerCapture e.pointerId
+  handle.setPointerCapture e.pointerId
+  handle.onpointermove = (e)-> moveDrag e
+  handle.onpointerup = handle.onpointercancel = ()->
+    handle.onpointermove = handle.onpointerup = handle.onpointercancel = null
+    endDrag()
 
-scaleElm.onpointermove = (e)->
-  return unless drag?
-  col = scaleCol e
+moveDrag = (e)->
   switch drag.kind
     when "left"
+      col = colAt drag.page, e
       changeSettings left: clamp col, 0, geo.right - 1 unless col is geo.left
     when "right"
+      col = colAt drag.page, e
       changeSettings right: geo.cols - clamp col, geo.left + 1, geo.cols unless col is geo.right
     when "tab"
-      # Pull a tab stop off the scale to clear it
       drag.removing = Math.abs(e.clientY - drag.y) > 30
       tabs = settings.tabs.slice()
-      tabs[drag.index] = clamp col, geo.left + 1, geo.right - 1
+      tabs[drag.index] = clamp colAt(drag.page, e), geo.left + 1, geo.right - 1
       Object.assign settings, {tabs}
       save "settings", settings
       invalidate()
+    when "top"
+      changeSettings top: clamp lineAt(drag.page, e), 0, geo.rows - geo.bottom - 1
+    when "bottom"
+      changeSettings bottom: clamp geo.rows - lineAt(drag.page, e), 0, geo.rows - geo.top - 1
 
-scaleElm.onpointerup = scaleElm.onpointercancel = (e)->
-  return unless drag?
+endDrag = ()->
   tabs = settings.tabs.slice()
   tabs.splice drag.index, 1 if drag.kind is "tab" and drag.removing
   drag = null
   changeSettings {tabs}
-  showGuides scaleElm.matches ":hover"
+  showGuides false
 
-# Top & bottom margin stops
 pagesElm.addEventListener "pointerdown", (e)->
-  stop = e.target.closest ".vstop"
-  return unless stop?
-  e.preventDefault()
-  e.stopPropagation()
-  drag = kind: stop.dataset.kind, page: stop.closest ".page"
-  stop.classList.add "dragging"
-  showGuides true
-  stop.setPointerCapture e.pointerId
-  stop.onpointermove = (e)->
-    rect = drag.page.getBoundingClientRect()
-    line = Math.round (e.clientY - rect.top) / pxPerInch * linesPerInch
-    if drag.kind is "top"
-      changeSettings top: clamp line, 0, geo.rows - geo.bottom - 1
-    else
-      changeSettings bottom: clamp geo.rows - line, 0, geo.rows - geo.top - 1
-  stop.onpointerup = stop.onpointercancel = ()->
-    stop.onpointermove = stop.onpointerup = stop.onpointercancel = null
-    stop.classList.remove "dragging"
-    drag = null
-    showGuides false
+  page = e.target.closest ".page"
+  return unless page?
+  if handle = e.target.closest ".vstop, .flag.down, .tabstop"
+    startDrag e, handle, kind: handle.dataset.kind, index: +handle.dataset.index, page: page
+  else if strip = e.target.closest ".strip"
+    # Clicking an empty part of the strip sets a new tab stop
+    col = colAt page, e
+    return unless geo.left < col < geo.right
+    changeSettings tabs: settings.tabs.concat col
+    startDrag e, strip, kind: "tab", index: settings.tabs.indexOf(col), page: page
 , true
 
 # TYPING ##########################################################################################
@@ -766,24 +858,24 @@ input.addEventListener "keydown", (e)->
     moveToLineEdge e.key is "ArrowRight", e.shiftKey
   else
     # Let the textarea handle it, then catch up
-    requestAnimationFrame ()->
-      renderSelection()
-    
+    requestAnimationFrame ()-> renderSelection()
+
 input.addEventListener "input", ()->
+  syncStyles()
   saveText()
   render()
   scrollCaretIntoView()
 
 for type in ["select", "selectionchange", "keyup"]
-  input.addEventListener type, ()->
-    renderSelection()
-  document.addEventListener "selectionchange", ()->
-  if document.activeElement is input
-    renderSelection()
-  
+  input.addEventListener type, ()-> renderSelection()
+document.addEventListener "selectionchange", ()->
+  renderSelection() if document.activeElement is input
+
 updateFocus = ()-> document.body.classList.toggle "focused", document.activeElement is input
 input.addEventListener "focus", updateFocus
-input.addEventListener "blur", updateFocus
+input.addEventListener "blur", ()->
+  updateFocus()
+  renderFormatMenu()
 
 # POINTER #########################################################################################
 
@@ -824,7 +916,7 @@ clickCount = (e)->
 
 pagesElm.addEventListener "pointerdown", (e)->
   return unless e.target.closest ".page"
-  return if e.target.closest ".paper-label"
+  return if e.target.closest ".paper-label, .strip, .vstop"
   return if e.button isnt 0
 
   # On touch screens, a tap places the carriage, and a drag scrolls
@@ -854,11 +946,18 @@ pagesElm.addEventListener "pointermove", (e)->
 
 pagesElm.addEventListener "pointerup", (e)->
   if pointer?.touch and Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) < 10
+    pointer = null
     input.focus preventScroll: true
     goalCol = null
     i = hitTest e
-    setSelection i, i
+    count = clickCount e
+    if count >= 2 then setSelection expand(i, count)... else setSelection i, i
   pointer = null
+  renderFormatMenu()
+
+# Mobile browsers follow a tap with a pretend mousedown that would pull focus off the page — stop it
+pagesElm.addEventListener "mousedown", (e)->
+  e.preventDefault() if e.target.closest(".page") and not e.target.closest(".paper-label")
 
 pagesElm.addEventListener "pointercancel", ()-> pointer = null
 
@@ -905,10 +1004,14 @@ $("#print").onclick = ()->
 settings = Object.assign structuredClone(defaults), load "settings", {}
 normalize()
 
-input.value = (try localStorage.getItem "text") ? ""
+input.value = lastText = (try localStorage.getItem "text") ? ""
+
+# Text from before styles were kept per character is all in the machine's current style
+styles = (try localStorage.getItem "styles") ? ""
+styles = typingStyle().repeat input.value.length unless styles.length is input.value.length and /^[0-5]*$/.test styles
 
 syncControls()
-loadAtlas()
+loadAtlases()
 render()
 input.focus preventScroll: true
 input.setSelectionRange layout.n, layout.n

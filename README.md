@@ -4,8 +4,10 @@ A typewriter you type on directly. Every letter is struck from scans of a real S
 onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
 
 - Click the paper to place the carriage, and type.
-- Drag the margin stops on the scale; click the scale to set a tab, pull a tab off to clear it.
-- The top & bottom margin stops (in lines) sit along the left edge of each sheet.
+- Sheets are shown at actual size. When one is wider than the screen, it slides with the carriage as you type.
+- The left & right margin tabs sit above the sheet, the top & bottom ones (in lines) along its left edge — drag them.
+  Click the strip above the sheet to set a tab stop; drag one away to clear it.
+- Select text to restrike it light, double struck, or in red.
 - Tap the paper size in the corner of the sheet to feed in a different kind of paper.
 - The line space lever sets single, 1½, or double spacing.
 - ⌘/Ctrl+Enter feeds a fresh sheet. Save downloads 600 dpi PNGs; Print prints at the exact sheet size.
