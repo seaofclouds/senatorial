@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Builds docs/character-sheet.pdf: every character Senatorial should have, on one US Letter sheet, in light, regular
-# and double struck. Characters the typewriter already has are cut straight from the scans in glyphs/ at true size;
+# and double struck, and docs/character-sheet-red.pdf, the same in the red half of the ribbon. Characters the typewriter already has are cut straight from the scans in glyphs/ at true size;
 # accented letters show their bare letter, to draw the accent over; anything else is left blank, to draw in.
 # Each one is labelled underneath in grey, with clear space between, and the baseline is ticked in non-photo blue.
 #
@@ -57,61 +57,53 @@ def crop(img, c):
     gx, gy = atlasPos(c)
     box = tuple(round(v) for v in (gx - pad, gy - pad, gx + gw + pad, gy + gh + pad))
     buf = io.BytesIO()
-    img.crop(box).convert("L").save(buf, "PNG")
+    img.crop(box).convert("RGB").save(buf, "PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 # Characters that come out tiny in any font, so their labels are set larger
 smallLabels = set("¹²³¼½¾ªº´¨ˆ˜¸˛˝ˇ¯˘˙˚·‚„‘’“”™")
 
-weights = [("Light", "light"), ("Regular", "regular"), ("Double struck", "double")]
 inch = lambda px: f"{px / atlasDPI:.4f}in"
+columns = 32
 
-sections = []
-for title, name in weights:
-    img = Image.open(os.path.join(root, "glyphs", name + ".png"))
+def section(title, atlas):
+    img = Image.open(os.path.join(root, "glyphs", atlas + ".png"))
     cells = []
     for c in chars:
         shown = c if atlasPos(c) else base(c)
         glyph = f'<img src="{crop(img, shown)}">' if shown and atlasPos(shown) else ""
         small = " small" if c in smallLabels else ""
         cells.append(f'<div class="cell"><div class="glyph">{glyph}</div><div class="label{small}">{html.escape(c)}</div></div>')
-    sections.append(f'<section><h2>{title}</h2><div class="grid">{"".join(cells)}</div></section>')
+    return f'<section><h2>{title}</h2><div class="grid">{"".join(cells)}</div></section>'
 
 font = sys.argv[1] if len(sys.argv) > 1 else None
 fontSrc = f"url('file://{os.path.abspath(font)}')" if font else \
     "url('https://fonts.gstatic.com/s/inconsolata/v37/QldgNThLqRwH-OJ1UHjlKENVzkWGVkL3GZQmAwLYxYWI2qfdm7Lpp4U8aRo.ttf')"
 
-page = f"""<!doctype html><meta charset="utf-8"><title>Senatorial Character Sheet</title>
-<style>
+style = f"""
 @font-face {{ font-family: Inconsolata; src: {fontSrc}; }}
 @page {{ size: 8.5in 11in; margin: 0 }}
 * {{ box-sizing: border-box }}
 body {{ margin: 0; font-family: Inconsolata, 'DejaVu Sans Mono', monospace; color: #000 }}
 main {{ width: 8.5in; height: 11in; padding: 0.35in 0.4in }}
-h1 {{ font-size: 10pt; font-weight: 600; margin: 0 0 0.02in; letter-spacing: 0.04em }}
-p {{ font-size: 7pt; color: #888; margin: 0 0 0.04in }}
+h1 {{ font-size: 10pt; font-weight: 600; margin: 0; letter-spacing: 0.04em }}
 h2 {{ font-size: 8pt; font-weight: 600; margin: 0.06in 0 0; letter-spacing: 0.04em }}
-.grid {{ display: grid; grid-template-columns: repeat(32, 0.24in) }}
-.cell {{ height: 0.395in; display: flex; flex-direction: column; align-items: center }}
+.grid {{ display: grid; grid-template-columns: repeat({columns}, 0.24in) }}
+.cell {{ position: relative; height: 0.395in; display: flex; flex-direction: column; align-items: center }}
 /* Room above the capitals for accents; the bottom edge is the baseline */
 .glyph {{ position: relative; width: {inch(gw)}; height: 0.21in; flex: none }}
 .glyph img {{ position: absolute; left: {inch(-pad)}; bottom: {inch(baseline - gh - pad)}; width: {inch(gw + 2 * pad)};
   height: {inch(gh + 2 * pad)}; mix-blend-mode: multiply }}
-/* The baseline is marked by ticks either side, in non-photo blue, leaving the space to draw in clear */
-.glyph::before, .glyph::after {{ content: ""; position: absolute; bottom: 0; width: 0.018in; border-bottom: 0.75pt solid #a4dded }}
-.glyph::before {{ left: -0.058in }} .glyph::after {{ right: -0.058in }}
+/* The baseline is marked by one short tick between each pair of characters (and at the ends of each row), in
+   non-photo blue, leaving the space to draw in clear */
+.cell::before, .cell:nth-child({columns}n)::after, .cell:last-child::after {{ content: ""; position: absolute;
+  top: calc(0.21in - 0.4pt); width: 0.02in; border-bottom: 0.4pt solid #a4dded }}
+.cell::before {{ left: -0.01in }} .cell::after {{ right: -0.01in }}
 /* Clear space under the baseline for descenders, then the label */
 .label {{ font-size: 8.5pt; line-height: 0.11in; color: #666; margin-top: 0.075in }}
 .label.small {{ font-size: 11.5pt }}
-</style>
-<main>
-<h1>SENATORIAL CHARACTER SHEET</h1>
-<p>True size, cut from the scans. Draw what's missing on the blue baseline ticks; accented letters show the bare letter.</p>
-{"".join(sections)}
-</main>"""
+"""
 
-out = os.path.join(root, "docs", "character-sheet")
-open(out + ".html", "w").write(page)
 printer = """
 const { chromium } = require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright');
 (async () => {
@@ -120,6 +112,17 @@ const { chromium } = require(require('child_process').execSync('npm root -g').to
   await p.pdf({ path: process.argv[2], preferCSSPageSize: true, printBackground: true });
   await b.close();
 })();"""
-subprocess.run(["node", "-e", printer, out + ".html", out + ".pdf"], check=True)
-os.remove(out + ".html")
-print(f"{len(chars)} characters → {out}.pdf")
+
+# The red half of the ribbon was only scanned light and regular; the app strikes double struck red as regular
+sheets = [
+    ("character-sheet", "Character Sheet", [("Light", "light"), ("Regular", "regular"), ("Double struck", "double")]),
+    ("character-sheet-red", "Character Sheet Red", [("Light", "light-red"), ("Regular", "regular-red")]),
+]
+for file, title, weights in sheets:
+    out = os.path.join(root, "docs", file)
+    page = f"""<!doctype html><meta charset="utf-8"><title>{title}</title><style>{style}</style>
+<main><h1>{title.upper()}</h1>{"".join(section(name, atlas) for name, atlas in weights)}</main>"""
+    open(out + ".html", "w").write(page)
+    subprocess.run(["node", "-e", printer, out + ".html", out + ".pdf"], check=True)
+    os.remove(out + ".html")
+    print(f"{len(chars)} characters × {len(weights)} → {out}.pdf")
