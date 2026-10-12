@@ -127,7 +127,8 @@
     background: var(--body);
   }
 
-  .saved { font-size: .85rem; color: hsl(38, 4%, 62%); }
+  .saved, .export { font-size: .85rem; color: hsl(38, 4%, 62%); }
+  .export { display: flex; align-items: center; gap: .5em; }
 
   /* READING — a page's link shows just the page, in the middle of the screen (or from the top, when it's taller),
      with a key to bring up the machine */
@@ -137,10 +138,11 @@
     .pages { padding: 1.5em 0; }
   }
 
+  /* Edit, and then Save, in the same spot in the corner */
   .edit-key {
     position: fixed;
-    right: 1.5em;
-    bottom: 1.5em;
+    top: 1em;
+    right: 1em;
     z-index: 1;
     padding: .3em 1.1em;
     color: hsl(38, 6%, 88%);
@@ -553,9 +555,14 @@
 
   @media print {
     body { display: block; background: none; }
-    section { display: none; }
+    section, .edit-key { display: none; }
     .print { display: block; }
-    .print img { display: block; break-after: page; }
+    .print .leaf { position: relative; break-inside: avoid; }
+    .print .leaf:not(:last-child) { break-after: page; }
+    .print img { display: block; width: 100%; height: 100%; }
+    .print .trim { display: none; position: absolute; }
+    .print .trim.across { width: .25in; margin-top: -.25pt; border-top: .5pt solid black; }
+    .print .trim.down { height: .25in; margin-left: -.25pt; border-left: .5pt solid black; }
   }
 
   @media (max-width: 700px) {
@@ -586,13 +593,13 @@
       <button id="paper" title="Paper">Letter</button>
       <span class="saved"></span>
       <button id="new" title="Feed in a fresh page, at a new link">New</button>
-      <button id="download" title="Save each page as a picture">Save</button>
-      <button id="import" title="Open a Markdown or text file">Import</button>
-      <button id="export" title="Save the text as a Markdown file">Export</button>
+      <button id="import" title="Open a Markdown or text file in place of this page">Import Markdown</button>
       <input type="file" id="importFile" accept=".md,.markdown,.txt,text/markdown,text/x-markdown,text/plain" hidden>
-      <button id="print">Print</button>
-      <button id="share" title="Copy the link to this page — it always shows the latest version">Share</button>
-      <button id="done" title="Put the machine away, and see the page the way others do">Done</button>
+      <span class="export">Export
+        <button id="download" title="Each page as a 600 dpi picture">PNG</button>
+        <button id="export" title="The text, as a Markdown file">Markdown</button>
+      </span>
+      <button id="print" title="Print each sheet on paper of its own size">Print</button>
     </div>
   </div>
 </section>

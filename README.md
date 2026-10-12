@@ -16,11 +16,14 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
 - The paper key, on the left of the control bar, lays out every kind of paper on the desk to feed in. Type in a custom
   size and Save size names it and keeps it on the desk for next time (× forgets it).
 - The line space lever, under the top margin tab, sets single, 1½, or double spacing.
-- ⌘/Ctrl+Enter feeds a fresh sheet. Save downloads 600 dpi PNGs; Print prints at the exact sheet size.
+- ⌘/Ctrl+Enter feeds a fresh sheet. Export PNG downloads each sheet as a 600 dpi picture.
+- Print prints each sheet on paper of its own size and orientation, edge to edge, in Chrome and Edge. Safari
+  prints on whatever paper its print dialog has picked, so pick the sheet's size there; if the paper's bigger, the
+  sheet comes out at its true size in the middle, with trim marks to cut it out by.
 
 ## The text is Markdown
 
-What's on the page is stored, copied, and exported (with the Export key) as plain Markdown. Import opens a Markdown or
+What's on the page is stored, copied, and exported (with Export Markdown) as plain Markdown. Import Markdown opens a Markdown or
 text file in its place — or drop one on the page — and Undo brings back what was there. The markers are invisible
 on the page and take up no room on the grid — and typing them by hand works too:
 
@@ -58,10 +61,10 @@ column. Columns spread out across the line when they fit, and wrap within a shar
 
 Each page lives at its own link, `/s/…`, and is saved there as you type — so whatever's on the page is always ready to
 share. Visiting the site takes you to the page you were last working on, and New feeds in a fresh one at a new link
-(Back returns to the one before). Share copies the page's link, or brings up the share sheet on a phone.
+(Back returns to the one before). To share a page, share its link — it's the one in the address bar.
 
 Opening a link shows just the page, in the middle of the screen, with an Edit key in the corner. On a page you made,
-Edit brings up the machine, and Done puts it away again. Anyone else sees the latest version (an open link picks up
+Edit brings up the machine, and Save (in the same spot) puts it away again. Anyone else sees the latest version (an open link picks up
 changes when they come back to it), and their Edit key makes them a copy of their own, at its own link.
 
 Only the browser a page was made in can change it: it keeps the page's key, and the server keeps just a hash of it.

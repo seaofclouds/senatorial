@@ -2056,11 +2056,11 @@ window.addEventListener "resize", ()-> render()
 
 # Every page lives at its own link, /s/<id>, and is saved there as it's typed, so it's always ready to share. Anyone
 # with the link sees the page as it stands, read-only. The browser that made a page keeps its key and can edit it:
-# Edit brings up the machine, and Done puts it away again. Anyone else's Edit makes them a copy of their own.
+# Edit brings up the machine, and Save (the same key) puts it away again. Anyone else's Edit makes them a copy of
+# their own.
 # Visiting the site itself goes back to the page you were last working on, or feeds in a fresh one.
 
 editKey = $ ".edit-key"
-shareKey = $ "#share"
 savedLabel = $ ".saved"
 
 shares = load "shares", {} # id → key, for each page made here
@@ -2115,8 +2115,8 @@ setMode = (edit)->
   input.readOnly = viewing
   caretElm.hidden = viewing
   gutterL = if viewing then 16 else 64
-  editKey.textContent = if owns pageId then "Edit" else "Edit a copy"
-  editKey.hidden = not viewing or (pageMissing and not owns pageId)
+  editKey.textContent = if not viewing then "Save" else if owns pageId then "Edit" else "Edit a copy"
+  editKey.hidden = pageMissing and not owns pageId
   if viewing
     formatMenu.hidden = true
     showTools null
@@ -2131,6 +2131,9 @@ setMode = (edit)->
     updateFocus()
 
 editKey.onclick = ()->
+  unless viewing
+    publish()
+    return setMode false
   if owns pageId
     # Changes made in another window that haven't reached the server yet
     cached = cachedPage pageId
@@ -2144,10 +2147,6 @@ editKey.onclick = ()->
     cachePage true
     publish()
   setMode true
-
-$("#done").onclick = ()->
-  publish()
-  setMode false
 
 # A fresh sheet, at a new link. The page that was on the machine stays at its own.
 $("#new").onclick = ()->
@@ -2200,20 +2199,6 @@ publish = ()->
     publish()
 
 document.addEventListener "visibilitychange", ()-> publish() if document.hidden and publishTimer?
-
-# Share copies the page's link, or brings up the share sheet on a phone
-shareKey.onclick = ()->
-  publish()
-  url = pageUrl pageId
-  if navigator.share? and matchMedia("(pointer: coarse)").matches
-    navigator.share(url: url, title: pageTitle() or "Senatorial").catch ()-> null
-    return
-  try
-    await navigator.clipboard.writeText url
-    shareKey.textContent = "Copied"
-    setTimeout (()-> shareKey.textContent = "Share"), 1500
-  catch
-    prompt "The link to this page:", url
 
 # While reading a page, it picks up the latest version every so often, and on coming back to it
 refreshPage = ()->
@@ -2283,20 +2268,52 @@ loadMarkdown = (md)->
   slideCarriage 0
   window.scrollTo 0, 0
 
+# Each sheet prints on paper of its own size, the way it's fed in, and fills it. Safari keeps to whatever paper is
+# picked in its print dialog, so there, if that's bigger than the sheet, the sheet comes out at its true size in the
+# middle, with trim marks at the corners to cut it out by. (Chrome measures print media queries against the window,
+# not the paper, so the marks are left to Safari, which measures them against the paper.)
+isSafari = /^((?!chrome|chromium|crios|fxios|android).)*safari/i.test navigator.userAgent
+
 $("#print").onclick = ()->
   printElm = $ ".print"
   printElm.innerHTML = ""
   style = document.createElement "style"
-  style.textContent = "@page { size: #{geo.w}in #{geo.h}in; margin: 0; }"
+  style.textContent = """
+    @page { size: #{geo.w}in #{geo.h}in; margin: 0; }
+    .print .leaf { width: #{geo.w}in; height: #{geo.h}in; }
+  """
+  style.textContent += """
+    @media print and (min-width: #{geo.w + 0.8}in), print and (min-height: #{geo.h + 0.9}in) {
+      .print .leaf { margin: .5in auto 0; }
+      .print .trim { display: block; }
+    }
+  """ if isSafari
   printElm.append style
   for _, p in layout.pages
+    leaf = document.createElement "div"
+    leaf.className = "leaf"
     img = new Image()
     img.src = URL.createObjectURL await toBlob renderPageAtExportSize p
-    img.style.width = "#{geo.w}in"
-    img.style.height = "#{geo.h}in"
     await img.decode()
-    printElm.append img
+    leaf.append img, trimMarks()...
+    printElm.append leaf
   window.print()
+
+# A pair of short lines off each corner, lined up with the sheet's edges, an eighth of an inch clear of them
+trimMarks = ()->
+  marks = []
+  for x in [0, 1]
+    for y in [0, 1]
+      across = document.createElement "div"
+      across.className = "trim across"
+      across.style.top = "#{y * 100}%"
+      across.style.left = if x then "calc(100% + .125in)" else "-.375in"
+      down = document.createElement "div"
+      down.className = "trim down"
+      down.style.left = "#{x * 100}%"
+      down.style.top = if y then "calc(100% + .125in)" else "-.375in"
+      marks.push across, down
+  marks
 
 # GO ##############################################################################################
 
