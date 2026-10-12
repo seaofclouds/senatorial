@@ -34,6 +34,8 @@ defaults =
   right: 11 # right margin, in columns in from the right edge of the paper
   top: 6 # top margin, in lines from the top edge of the paper (6 = 1")
   bottom: 6 # bottom margin, in lines up from the bottom edge of the paper
+  linkLeftRight: false # when linked, the left & right margins mirror each other
+  linkTopBottom: false # and the same for the top & bottom
   tabs: [] # tab stops, in columns from the left edge of the paper. When empty, there's a stop every 5 columns.
   atlas: "regular"
   red: false
@@ -385,12 +387,12 @@ render = ()->
 
     view.label.textContent = paperName()
     view.top.style.top = g.top / linesPerInch * pxPerInch + "px"
-    view.top.textContent = g.top
+    setFlag view.top, g.top, settings.linkTopBottom
     view.top.title = "Top margin: #{g.top} lines (#{fmt g.top / linesPerInch} in)"
     view.bottom.style.top = (g.h - g.bottom / linesPerInch) * pxPerInch + "px"
-    view.bottom.textContent = g.bottom
+    setFlag view.bottom, g.bottom, settings.linkTopBottom
     view.bottom.title = "Bottom margin: #{g.bottom} lines (#{fmt g.bottom / linesPerInch} in) · #{g.linesPerPage} lines per page"
-    view.spacing.style.top = g.top / linesPerInch * pxPerInch + 16 + "px"
+    view.spacing.style.top = g.top / linesPerInch * pxPerInch + view.top.offsetHeight / 2 + 6 + "px"
     setLever view.spacing, spacings, settings.spacing
     renderStrip view, g
 
@@ -437,13 +439,11 @@ renderStrip = (view, g)->
   step = pxPerInch / charactersPerInch
   marks = [
     {kind: "center", col: g.w * charactersPerInch / 2, title: "Centre of the sheet"}
-    {kind: "left", col: g.left, title: "Left margin at #{g.left} (#{fmt g.left / charactersPerInch} in)"}
-    {kind: "right", col: g.right, title: "Right margin at #{g.right} (#{fmt (g.cols - g.right) / charactersPerInch} in from the edge) · #{g.right - g.left} characters per line"}
+    {kind: "left", col: g.left, value: g.left, title: "Left margin: #{g.left} characters (#{fmt g.left / charactersPerInch} in) in from the left edge"}
+    {kind: "right", col: g.right, value: g.cols - g.right, title: "Right margin: #{g.cols - g.right} characters (#{fmt (g.cols - g.right) / charactersPerInch} in) in from the right edge · #{g.right - g.left} characters per line"}
   ]
   for col, index in settings.tabs
     marks.push {kind: "tab", col, index, title: "Tab stop at #{col} — drag it away to clear it"}
-  unless settings.tabs.length
-    marks.push {kind: "default", col} for col in defaultTabs g
 
   elms = Array.from view.strip.querySelectorAll ".mark"
   while elms.length < marks.length
@@ -455,16 +455,24 @@ renderStrip = (view, g)->
     e.className = "mark " + switch mark.kind
       when "left", "right" then "flag down"
       when "tab" then "tabstop"
-      when "center" then "center-mark"
-      else "default-tab"
+      else "center-mark"
     e.classList.toggle "removing", drag?.kind is "tab" and drag.index is mark.index and drag.removing
     e.classList.toggle "dragging", drag?.kind is mark.kind and (mark.kind isnt "tab" or drag.index is mark.index)
     e.dataset.kind = mark.kind
     e.dataset.index = mark.index ? ""
     e.style.left = mark.col * step + "px"
-    e.textContent = if mark.kind in ["left", "right"] then mark.col else ""
+    if mark.value? then setFlag e, mark.value, settings.linkLeftRight else e.textContent = ""
     e.title = mark.title ? ""
   null
+
+# Each margin tab shows how far in it sits from its own edge, under a link that couples it to the opposite margin
+linkIcon = "<svg viewBox='0 0 16 16'><path d='M6.5 9.5l3-3'/><path d='M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1'/><path d='M9 11.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l1-1'/></svg>"
+brokenLinkIcon = "<svg viewBox='0 0 16 16'><path d='M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1'/><path d='M9 11.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l1-1'/><path d='M2.5 5.5l-1-.3M5.5 2.5l-.3-1M13.5 10.5l1 .3M10.5 13.5l.3 1'/></svg>"
+
+setFlag = (elm, value, linked)->
+  html = "<span class='link#{if linked then " linked" else ""}' title='#{if linked then "Linked to the opposite margin — click to unlink" else "Click to link to the opposite margin"}'>#{if linked then linkIcon else brokenLinkIcon}</span><span class='value'>#{value}</span>"
+  elm.innerHTML = html unless elm.dataset.html is html
+  elm.dataset.html = html
 
 # Caret position for index i, in CSS px relative to the .pages container
 caretPoint = (i)->
@@ -815,14 +823,44 @@ startDrag = (e, handle, d)->
     handle.onpointermove = handle.onpointerup = handle.onpointercancel = null
     endDrag()
 
+# Margins are measured in from their own edge. Linked margins mirror each other, so they can't cross in the middle.
+maxLinkedInset = (kind)->
+  if kind in ["left", "right"] then Math.ceil(geo.cols / 2) - 1 else Math.floor (geo.rows - 1) / 2
+
+setInset = (kind, inset)->
+  changes =
+    if kind in ["left", "right"] and settings.linkLeftRight
+      inset = clamp inset, 0, maxLinkedInset kind
+      left: inset, right: inset
+    else if kind in ["top", "bottom"] and settings.linkTopBottom
+      inset = clamp inset, 0, maxLinkedInset kind
+      top: inset, bottom: inset
+    else switch kind
+      when "left" then left: clamp inset, 0, geo.right - 1
+      when "right" then right: clamp inset, 0, geo.cols - geo.left - 1
+      when "top" then top: clamp inset, 0, geo.rows - geo.bottom - 1
+      when "bottom" then bottom: clamp inset, 0, geo.rows - geo.top - 1
+  changeSettings changes if Object.keys(changes).some (k)-> settings[k] isnt changes[k]
+
+# Linking snaps the opposite margin to match the one whose link you clicked
+toggleLink = (kind)->
+  pair = if kind in ["left", "right"] then "linkLeftRight" else "linkTopBottom"
+  if settings[pair]
+    changeSettings "#{pair}": false
+  else
+    inset = switch kind
+      when "left" then geo.left
+      when "right" then geo.cols - geo.right
+      when "top" then geo.top
+      when "bottom" then geo.bottom
+    settings[pair] = true
+    setInset kind, inset
+    changeSettings {}
+
 moveDrag = (e)->
   switch drag.kind
-    when "left"
-      col = colAt drag.page, e
-      changeSettings left: clamp col, 0, geo.right - 1 unless col is geo.left
-    when "right"
-      col = colAt drag.page, e
-      changeSettings right: geo.cols - clamp col, geo.left + 1, geo.cols unless col is geo.right
+    when "left" then setInset "left", colAt drag.page, e
+    when "right" then setInset "right", geo.cols - colAt drag.page, e
     when "tab"
       drag.removing = Math.abs(e.clientY - drag.y) > 30
       tabs = settings.tabs.slice()
@@ -830,10 +868,8 @@ moveDrag = (e)->
       Object.assign settings, {tabs}
       save "settings", settings
       invalidate()
-    when "top"
-      changeSettings top: clamp lineAt(drag.page, e), 0, geo.rows - geo.bottom - 1
-    when "bottom"
-      changeSettings bottom: clamp geo.rows - lineAt(drag.page, e), 0, geo.rows - geo.top - 1
+    when "top" then setInset "top", lineAt drag.page, e
+    when "bottom" then setInset "bottom", geo.rows - lineAt drag.page, e
 
 endDrag = ()->
   tabs = settings.tabs.slice()
@@ -845,7 +881,11 @@ endDrag = ()->
 pagesElm.addEventListener "pointerdown", (e)->
   page = e.target.closest ".page"
   return unless page?
-  if handle = e.target.closest ".vstop, .flag.down, .tabstop"
+  if link = e.target.closest ".link"
+    e.preventDefault()
+    e.stopPropagation()
+    toggleLink link.closest(".flag").dataset.kind
+  else if handle = e.target.closest ".vstop, .flag.down, .tabstop"
     startDrag e, handle, kind: handle.dataset.kind, index: +handle.dataset.index, page: page
   else if strip = e.target.closest ".strip"
     # Clicking an empty part of the strip sets a new tab stop

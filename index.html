@@ -52,8 +52,8 @@
     display: flex;
     flex-flow: column;
     align-items: flex-start;
-    gap: 3em;
-    padding: 2em 0 1.5em;
+    gap: 4em;
+    padding: 3.5em 0 1.5em;
     transition: translate .2s ease-out;
     touch-action: pan-y pinch-zoom; /* Sideways swipes slide the sheet; this also stops double-tap zooming */
     &.sliding { transition: none; }
@@ -126,15 +126,15 @@
     background: var(--body);
   }
 
-  /* MARGIN & TAB STOPS — light arrow tabs that point at exactly where each margin falls */
+  /* MARGIN & TAB STOPS — light tabs, rounded on the outside, pointing at exactly where each margin falls */
 
-  /* The strip along the top of each sheet holds the left & right margins, tab stops, and carriage pointer */
+  /* The strip along the top of each sheet holds the left & right margins, tab stops, and centre mark */
   .strip {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 100%;
-    height: 26px;
+    height: 44px;
     cursor: copy;
     touch-action: none;
     user-select: none;
@@ -142,40 +142,64 @@
   }
 
   .flag {
+    --tab: hsl(36, 10%, 82%);
     position: absolute;
-    min-width: 1.9em;
+    display: flex;
+    flex-flow: column;
+    align-items: center;
+    gap: 1px;
+    width: 22px;
+    padding: 4px 0 3px;
     font-size: 11px;
-    line-height: 15px;
-    text-align: center;
+    line-height: 12px;
     font-variant-numeric: tabular-nums;
     color: hsl(30, 5%, 46%);
-    background: hsl(36, 10%, 82%);
+    background: var(--tab);
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
     opacity: .7;
-    transition: opacity .15s, background-color .15s;
-    &:hover, &.dragging { opacity: 1; background: hsl(36, 10%, 76%); }
+    transition: opacity .15s;
+    &:hover, &.dragging { opacity: 1; --tab: hsl(36, 10%, 77%); }
     body.guides & { opacity: 1; }
+
+    /* The point */
+    &::after {
+      content: '';
+      position: absolute;
+      background: var(--tab);
+    }
   }
 
   /* Left & right margin tabs hang above the sheet, pointing down at the margin */
   .flag.down {
-    bottom: 1px;
-    padding: 1px 5px 6px;
+    bottom: 7px;
     translate: -50%;
-    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), 50% 100%, 0 calc(100% - 6px));
+    border-radius: 11px 11px 2px 2px;
     cursor: ew-resize;
+    &::after { top: 100%; left: 0; right: 0; height: 6px; clip-path: polygon(0 0, 100% 0, 50% 100%); }
   }
 
   /* Top & bottom margin tabs sit off the left edge, pointing right at the margin */
   .flag.across {
     right: 100%;
-    margin-right: 1px;
-    padding: 1px 9px 1px 5px;
+    margin-right: 7px;
     translate: 0 -50%;
-    clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 0 100%);
+    border-radius: 11px 2px 2px 11px;
     cursor: ns-resize;
+    &::after { left: 100%; top: 0; bottom: 0; width: 6px; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+  }
+
+  /* Links a margin to the one opposite, so they move together */
+  .link {
+    display: block;
+    width: 14px;
+    height: 14px;
+    color: hsl(30, 5%, 62%);
+    cursor: pointer;
+    &.linked { color: hsl(30, 5%, 30%); }
+    &:hover { color: hsl(30, 5%, 22%); }
+    svg { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
   }
 
   .tabstop {
@@ -191,18 +215,6 @@
     &.removing { opacity: .25; }
   }
 
-  /* With no tab stops set, Tab jumps every 5 columns — shown as faint dots */
-  .default-tab {
-    position: absolute;
-    bottom: 4px;
-    width: 3px;
-    height: 3px;
-    border-radius: 50%;
-    translate: -50%;
-    background: hsl(36, 8%, 76%);
-    pointer-events: none;
-  }
-
   /* The centre of the sheet, for lining things up by eye */
   .center-mark {
     position: absolute;
@@ -211,7 +223,7 @@
     height: 9px;
     translate: -1px;
     border-radius: 1px 1px 0 0;
-    background: var(--caret);
+    background: hsl(36, 8%, 66%);
     pointer-events: none;
   }
 
@@ -350,29 +362,27 @@
     button.active svg { stroke: hsl(28, 3%, 14%); }
   }
 
-  /* On the sheet, the line space lever stands upright along the left edge, under the top margin tab */
+  /* On the sheet, the line space lever stands upright along the left edge, under the top margin tab —
+     a plain pill the same width as the tabs, with the settings engraved right on it */
   .lever.spacing {
     position: absolute;
     right: 100%;
-    margin-right: 5px;
+    margin-right: 7px;
     flex-flow: column;
-    border: 3px solid hsl(36, 10%, 80%);
-    background: hsl(36, 12%, 88%);
+    width: 22px;
+    padding: 3px 0;
+    border: 0;
+    border-radius: 11px;
+    background: hsl(36, 10%, 82%);
     box-shadow: none;
     opacity: .7;
     transition: opacity .15s;
     &:hover { opacity: 1; }
 
-    .knob {
-      top: 2px;
-      left: 1px;
-      background: hsl(36, 10%, 72%);
-      translate: 0 calc(var(--position) * 20px);
-    }
-
-    button { width: 18px; height: 20px; }
-    svg { width: 18px; stroke: hsl(30, 5%, 58%); }
-    button.active svg { stroke: hsl(30, 5%, 32%); }
+    .knob { display: none; }
+    button { width: 22px; height: 18px; }
+    svg { width: 16px; height: 18px; margin: auto; stroke: hsl(30, 5%, 64%); }
+    button.active svg { stroke: hsl(30, 5%, 30%); }
   }
 
   /* Paper size, written lightly in the corner of the sheet */

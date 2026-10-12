@@ -5,9 +5,10 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
 
 - Click the paper to place the carriage, and type.
 - Sheets are shown at actual size. When one is wider than the screen, it slides with the carriage as you type.
-- The left & right margin tabs sit above the sheet, the top & bottom ones (in lines) along its left edge — drag them.
-  Click the strip above the sheet to set a tab stop; drag one away to clear it.
-- On a phone, swipe sideways to slide the sheet. The red mark above the sheet is its centre.
+- The left & right margin tabs sit above the sheet, the top & bottom ones (in lines) along its left edge. Each shows how
+  far in it is from its own edge — drag them. Click a tab's link to tie it to the opposite margin, so the two mirror each other.
+- Click the strip above the sheet to set a tab stop; drag one away to clear it. The mark in the middle is the sheet's centre.
+- On a phone, swipe sideways to slide the sheet.
 - Select text to restrike it light, double struck, or in red. The alignment lever centres the paragraph you're in.
 - Tap the paper size in the corner of the sheet to feed in a different kind of paper.
 - The line space lever, under the top margin tab, sets single, 1½, or double spacing.
