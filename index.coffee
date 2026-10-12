@@ -1123,11 +1123,24 @@ drag = null
 
 showGuides = (show)-> document.body.classList.toggle "guides", show
 
-# The tabs & levers only show on the sheet you're reaching for: point at the strip above it or the margin to its left.
+# The tabs & levers only show on the sheet you're reaching for: point at the strip above it or the margin to its left —
+# or at the sheet's own blank margin along its top & left edges, so they're already there as you head for them.
 # On a touch screen, tap there and they stay up for a few seconds.
 toolsPage = null
 toolsTimer = null
 peripheral = ".edge, .strip, .page > .flag, .page > .lever.spacing"
+
+minimumBand = 16 # CSS px — even with a margin of nothing, there's this much of the sheet's edge to point at
+
+toolsPageAt = (e)->
+  if zone = e.target.closest peripheral
+    return zone.closest ".page"
+  page = e.target.closest ".page"
+  return null unless page? and not e.target.closest ".paper-label"
+  rect = page.getBoundingClientRect()
+  top = Math.max minimumBand, geo.top / linesPerInch * pxPerInch
+  left = Math.max minimumBand, geo.left / charactersPerInch * pxPerInch
+  if e.clientY - rect.top < top or e.clientX - rect.left < left then page else null
 
 showTools = (page)->
   return if page is toolsPage
@@ -1137,12 +1150,12 @@ showTools = (page)->
 
 pagesElm.addEventListener "pointermove", (e)->
   return if e.pointerType is "touch" or drag? or pointer?
-  showTools e.target.closest(peripheral)?.closest(".page") ? null
+  showTools toolsPageAt e
 pagesElm.addEventListener "pointerleave", (e)-> showTools null unless e.pointerType is "touch" or drag?
 
 pagesElm.addEventListener "pointerdown", (e)->
   return unless e.pointerType is "touch"
-  page = e.target.closest(peripheral)?.closest ".page"
+  page = toolsPageAt e
   clearTimeout toolsTimer
   if page?
     showTools page
