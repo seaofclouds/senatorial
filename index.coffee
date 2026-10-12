@@ -2297,7 +2297,8 @@ loadMarkdown = (md)->
 # Each sheet prints on paper of its own size, the way it's fed in, and fills it. Safari keeps to whatever paper is
 # picked in its print dialog, so there, if that's bigger than the sheet, the sheet comes out at its true size in the
 # middle, with trim marks at the corners to cut it out by. (Chrome measures print media queries against the window,
-# not the paper, so the marks are left to Safari, which measures them against the paper.)
+# not the paper, so the marks are left to Safari, which measures them against the paper. The room above the sheet is a
+# border, not a margin, since a margin at the top of a printed page is dropped.)
 isSafari = /^((?!chrome|chromium|crios|fxios|android).)*safari/i.test navigator.userAgent
 
 $("#print").onclick = ()->
@@ -2310,7 +2311,7 @@ $("#print").onclick = ()->
   """
   style.textContent += """
     @media print and (min-width: #{geo.w + 0.8}in), print and (min-height: #{geo.h + 0.9}in) {
-      .print .leaf { margin: .5in auto 0; }
+      .print .leaf { box-sizing: content-box; margin: 0 auto; border-top: .5in solid transparent; }
       .print .trim { display: block; }
     }
   """ if isSafari
