@@ -256,27 +256,132 @@
     }
   }
 
-  /* Paper tray — pops up out of the machine */
-  .tray {
-    position: absolute;
-    bottom: calc(100% + .75em);
-    right: 0;
+  /* Line space lever, after the Olympia SM9 */
+  .lever {
+    --position: 0;
+    position: relative;
     display: flex;
-    flex-flow: column;
-    gap: .75em;
-    width: min(27em, 100%);
-    padding: 1em;
-    border-radius: 1em;
-    background: var(--body);
-    box-shadow: 0 6px 20px #0003;
-    .keys { display: flex; flex-wrap: wrap; gap: .5em; }
+    border: 4px solid hsl(18, 2%, 42%);
+    border-radius: 24px;
+    background: hsl(28, 3%, 14%);
+    box-shadow: 0 0 0 2px #0003 inset;
+
+    .knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 10px;
+      background: hsl(28, 1%, 48%);
+      translate: calc(var(--position) * 22px);
+      transition: translate .1s;
+      pointer-events: none;
+    }
+
+    button {
+      position: relative;
+      width: 22px;
+      height: 20px;
+      padding: 0;
+      border-radius: 10px;
+      background: none;
+    }
+
+    svg {
+      display: block;
+      width: 20px;
+      height: 20px;
+      stroke: hsl(28, 1%, 40%);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+    }
+
+    button.active svg { stroke: hsl(28, 3%, 14%); }
   }
 
-  .size {
+  /* Paper size, written lightly in the corner of the sheet */
+  .paper-label {
+    position: absolute;
+    top: .6em;
+    right: .8em;
+    padding: .2em .3em;
+    border-radius: .3em;
+    font-size: .8rem;
+    color: hsl(30, 5%, 75%);
+    background: none;
+    &:hover { color: hsl(30, 5%, 50%); }
+  }
+
+  /* Paper chooser — every kind of sheet laid out on the desk */
+  .chooser {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
     display: flex;
-    align-items: center;
-    gap: .5em;
-    color: var(--engraving);
+    flex-flow: column;
+    gap: 2em;
+    padding: 2.5em 1.5em;
+    overflow: auto;
+    background: hsl(40 20% 90%);
+
+    .orientation {
+      display: flex;
+      justify-content: center;
+      gap: 1.5em;
+    }
+
+    .orientation button {
+      padding: 0;
+      font-size: .9rem;
+      color: hsl(30, 5%, 62%);
+      background: none;
+      &.active { color: hsl(30, 5%, 30%); }
+    }
+
+    .sheets {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: flex-end;
+      gap: 2em;
+      margin: auto 0;
+    }
+  }
+
+  body.choosing { overflow: hidden; }
+
+  .sheet {
+    position: relative;
+    flex: none;
+    display: flex;
+    flex-flow: column;
+    align-items: flex-end;
+    padding: .5em .6em;
+    background: white;
+    box-shadow: 0 .5px 1px #0001;
+    cursor: pointer;
+    transition: translate .15s, box-shadow .15s;
+    &:hover { translate: 0 -3px; box-shadow: 0 4px 12px #0002; }
+    &.active { box-shadow: 0 0 0 2px hsl(30, 5%, 55%); }
+
+    .name { font-size: .8rem; color: hsl(30, 5%, 45%); }
+    .dims { font-size: .7rem; color: hsl(30, 5%, 70%); }
+
+    .custom {
+      margin: auto;
+      display: flex;
+      align-items: center;
+      gap: .3em;
+      font-size: .8rem;
+      color: hsl(30, 5%, 70%);
+    }
+
+    [type=number] {
+      width: 3em;
+      color: hsl(30, 5%, 40%);
+      background: hsl(40 20% 94%);
+    }
   }
 
   [type=number] {
@@ -306,6 +411,7 @@
 
   @media (max-width: 700px) {
     .ui { bottom: .5em; padding: 0 .75em .75em; gap: 1.4em; }
+    .chooser { padding: 1.5em 1em; .sheets { gap: 1.2em; } }
     .buttons { gap: .5em; }
     .vstop.pill { margin-right: .1em; font-size: .8rem; min-width: 1.8em; }
   }
@@ -324,23 +430,22 @@
       <button id="light">Light</button>
       <button id="double">Double Struck</button>
       <input type="checkbox" id="red" class="toggle spacer" role="switch" title="Red ribbon">
-      <button id="paper" title="Paper">Letter</button>
-      <button id="spacing" title="Line spacing">Single</button>
+      <div class="lever" id="spacing" title="Line spacing"><span class="knob"></span></div>
       <button id="clearTabs" title="Clear all tab stops">Tab Clear</button>
       <button id="reset">Reset</button>
       <button id="download">Save</button>
       <button id="print">Print</button>
     </div>
-    <div class="tray" hidden>
-      <div class="keys" id="papers"></div>
-      <div class="keys">
-        <button id="portrait">Portrait</button>
-        <button id="landscape">Landscape</button>
-      </div>
-      <label class="size" id="customSize"><input id="customW" type="number" step="0.25" min="1" max="30"> × <input id="customH" type="number" step="0.25" min="1" max="30"> inches</label>
-    </div>
   </div>
 </section>
+
+<div class="chooser" hidden>
+  <div class="orientation">
+    <button data-landscape="false">Portrait</button>
+    <button data-landscape="true">Landscape</button>
+  </div>
+  <div class="sheets"></div>
+</div>
 
 <div class="print"></div>
 

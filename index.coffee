@@ -265,15 +265,19 @@ makePageView = ()->
   canvas = document.createElement "canvas"
   guide = document.createElement "div"
   guide.className = "guide"
+  label = document.createElement "button"
+  label.className = "paper-label"
+  label.title = "Change paper"
+  label.onclick = openChooser
   top = document.createElement "div"
   top.className = "pill vstop"
   top.dataset.kind = "top"
   bottom = document.createElement "div"
   bottom.className = "pill vstop"
   bottom.dataset.kind = "bottom"
-  elm.append canvas, guide, top, bottom
+  elm.append canvas, guide, label, top, bottom
   pagesElm.insertBefore elm, selectionElm
-  {elm, canvas, guide, top, bottom, ctx: canvas.getContext("2d"), key: null}
+  {elm, canvas, guide, label, top, bottom, ctx: canvas.getContext("2d"), key: null}
 
 render = ()->
   return unless settings?
@@ -305,6 +309,7 @@ render = ()->
       top: g.top / linesPerInch * pxPerInch + "px"
       height: (textBottom - g.top / linesPerInch) * pxPerInch + "px"
 
+    view.label.textContent = paperName()
     view.top.style.top = g.top / linesPerInch * pxPerInch + "px"
     view.top.textContent = g.top
     view.top.title = "Top margin: #{g.top} lines (#{fmt g.top / linesPerInch} in)"
@@ -478,69 +483,51 @@ normalize = ()->
   settings.bottom = Math.max 0, Math.round settings.bottom
   settings.customW = clamp +settings.customW or 8.5, 1, 30
   settings.customH = clamp +settings.customH or 11, 1, 30
+  settings.spacing = 1 unless settings.spacing in spacings
   settings.tabs = (Array.from new Set settings.tabs.map Math.round).sort (a, b)-> a - b
 
-spacings = [1, 1.5, 2, 3]
-spacingNames = {1: "Single", 1.5: "1½ Space", 2: "Double", 3: "Triple"}
+# Like the Olympia SM9's line space lever: single, one and a half, or double
+spacings = [1, 1.5, 2]
 
 controls = {}
-controls[id] = $ "#" + id for id in ["paper", "spacing", "red", "portrait", "landscape", "customSize", "customW", "customH"]
+controls[id] = $ "#" + id for id in ["spacing", "red", "customW", "customH"]
 atlasBtns = {}
 atlasBtns[id] = $ "#" + id for id in ["regular", "light", "double"]
-tray = $ ".tray"
+chooser = $ ".chooser"
 
-paperBtns = {}
-for key, paper of papers
-  do (key)->
-    btn = paperBtns[key] = document.createElement "button"
-    btn.textContent = paper.short
-    btn.title = paper.name
-    btn.onclick = ()-> changeSettings paper: key
-    $("#papers").append btn
+# Engrave each lever position with three little lines, spaced the way that setting feeds the paper
+spacingBtns = for s in spacings
+  do (s)->
+    gap = 3 * s
+    btn = document.createElement "button"
+    btn.title = "#{if s is 1 then "Single" else if s is 2 then "Double" else "1½"} spacing"
+    btn.innerHTML = "<svg viewBox='0 0 20 20'>" + ("<line x1='5' x2='15' y1='#{10 + k * gap}' y2='#{10 + k * gap}'/>" for k in [-1..1]).join("") + "</svg>"
+    btn.onclick = ()-> changeSettings spacing: s
+    controls.spacing.append btn
+    btn
+
+paperName = ()->
+  if settings.paper is "custom"
+    "#{fmt settings.customW} × #{fmt settings.customH}"
+  else
+    papers[settings.paper].short + (if settings.landscape then " landscape" else "")
 
 syncControls = ()->
-  p = papers[settings.paper]
-  controls.paper.textContent = if settings.paper is "custom" then "#{fmt settings.customW} × #{fmt settings.customH}" else p.short
-  controls.paper.title = "Paper: #{p.name}#{if settings.landscape then ", landscape" else ""}"
-  controls.paper.classList.toggle "active", not tray.hidden
-  controls.spacing.textContent = spacingNames[settings.spacing] ? "#{settings.spacing}×"
+  k = Math.max 0, spacings.indexOf settings.spacing
+  controls.spacing.style.setProperty "--position", k
+  btn.classList.toggle "active", i is k for btn, i in spacingBtns
   controls.red.checked = settings.red
-  controls.portrait.classList.toggle "active", not settings.landscape
-  controls.landscape.classList.toggle "active", settings.landscape
-  controls.customSize.hidden = settings.paper isnt "custom"
-  controls.customW.value = settings.customW unless document.activeElement is controls.customW
-  controls.customH.value = settings.customH unless document.activeElement is controls.customH
-  btn.classList.toggle "active", name is settings.paper for name, btn of paperBtns
   btn.classList.toggle "active", name is settings.atlas for name, btn of atlasBtns
+  renderChooser() unless chooser.hidden
   null
 
 for name, btn of atlasBtns
   do (name)-> btn.onclick = ()-> changeSettings atlas: name
 controls.red.onchange = ()-> changeSettings red: controls.red.checked
-controls.spacing.onclick = ()->
-  next = spacings[(spacings.indexOf(settings.spacing) + 1) % spacings.length]
-  changeSettings spacing: next
 $("#clearTabs").onclick = ()-> changeSettings tabs: []
-controls.portrait.onclick = ()-> changeSettings landscape: false
-controls.landscape.onclick = ()-> changeSettings landscape: true
-for dim in ["customW", "customH"]
-  do (dim)->
-    elm = controls[dim]
-    elm.oninput = ()-> changeSettings "#{dim}": +elm.value unless elm.value is "" or isNaN +elm.value
-    elm.onchange = syncControls
-
-controls.paper.onclick = ()->
-  tray.hidden = not tray.hidden
-  syncControls()
-
-# Close the paper tray when you go back to typing
-document.addEventListener "pointerdown", (e)->
-  unless tray.hidden or e.target.closest(".tray") or e.target is controls.paper
-    tray.hidden = true
-    syncControls()
 
 # Hand the keyboard back to the page after pressing a key on the machine
-for elm in document.querySelectorAll ".buttons button, .tray button, .toggle"
+for elm in document.querySelectorAll ".buttons button, .toggle"
   elm.addEventListener "click", ()-> input.focus preventScroll: true
 
 $("#reset").onclick = ()->
@@ -551,6 +538,73 @@ $("#reset").onclick = ()->
   changeSettings {}
   loadAtlas()
   input.focus()
+
+# PAPER CHOOSER ###################################################################################
+
+# Tap the paper size on the sheet, and every kind of paper is laid out on the desk, at true relative size.
+# Pick one to feed it in.
+
+chooserScale = 18 # CSS px per inch for the sheets on the desk
+
+openChooser = ()->
+  chooser.hidden = false
+  document.body.classList.add "choosing"
+  renderChooser()
+
+closeChooser = ()->
+  chooser.hidden = true
+  document.body.classList.remove "choosing"
+  input.focus preventScroll: true
+  scrollCaretIntoView()
+
+renderChooser = ()->
+  for btn in chooser.querySelectorAll "[data-landscape]"
+    btn.classList.toggle "active", btn.dataset.landscape is "#{settings.landscape}"
+  sheets = chooser.querySelector ".sheets"
+  sheets.innerHTML = ""
+  for key, paper of papers
+    do (key)->
+      [w, h] = if key is "custom" then [settings.customW, settings.customH] else [paper.w, paper.h]
+      [w, h] = [h, w] if settings.landscape and key isnt "custom"
+      sheet = document.createElement "div"
+      sheet.className = "sheet"
+      sheet.classList.add "active" if key is settings.paper
+      sheet.style.width = w * chooserScale + "px"
+      sheet.style.height = h * chooserScale + "px"
+      dims = if key is "custom" then "inches" else paper.name.split(" — ")[1]
+      sheet.innerHTML = "<span class='name'>#{paper.short}</span><span class='dims'>#{dims}</span>"
+      if key is "custom"
+        size = document.createElement "span"
+        size.className = "custom"
+        for dim in ["customW", "customH"]
+          do (dim)->
+            field = document.createElement "input"
+            field.type = "number"
+            field.step = "0.25"
+            field.min = 1
+            field.max = 30
+            field.value = settings[dim]
+            field.onclick = (e)-> e.stopPropagation()
+            field.onchange = ()->
+              unless field.value is "" or isNaN +field.value
+                Object.assign settings, "#{dim}": +field.value
+                changeSettings paper: "custom"
+            size.append field
+            size.append " × " if dim is "customW"
+        sheet.append size
+      sheet.onclick = ()->
+        changeSettings paper: key
+        closeChooser()
+      sheets.append sheet
+  null
+
+for btn in chooser.querySelectorAll "[data-landscape]"
+  do (btn)-> btn.onclick = (e)->
+    e.stopPropagation()
+    changeSettings landscape: btn.dataset.landscape is "true"
+
+chooser.onclick = (e)-> closeChooser() if e.target is chooser or e.target.matches ".sheets"
+document.addEventListener "keydown", (e)-> closeChooser() if e.key is "Escape" and not chooser.hidden
 
 # STOPS ###########################################################################################
 
@@ -770,6 +824,7 @@ clickCount = (e)->
 
 pagesElm.addEventListener "pointerdown", (e)->
   return unless e.target.closest ".page"
+  return if e.target.closest ".paper-label"
   return if e.button isnt 0
 
   # On touch screens, a tap places the carriage, and a drag scrolls
