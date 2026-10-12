@@ -127,8 +127,7 @@
     background: var(--body);
   }
 
-  .saved, .export { font-size: .85rem; color: hsl(38, 4%, 62%); }
-  .export { display: flex; align-items: center; gap: .5em; }
+  .saved { font-size: .85rem; color: hsl(38, 4%, 62%); }
 
   /* READING — a page's link shows just the page, in the middle of the screen (or from the top, when it's taller),
      with a key to bring up the machine */
@@ -138,11 +137,11 @@
     .pages { padding: 1.5em 0; }
   }
 
-  /* Edit, and then Save, in the same spot in the corner */
+  /* Edit, and then Save, in the same spot in the corner (the machine stops short of it) */
   .edit-key {
     position: fixed;
-    top: 1em;
-    right: 1em;
+    right: 1.5em;
+    bottom: 1.5em;
     z-index: 1;
     padding: .3em 1.1em;
     color: hsl(38, 6%, 88%);
@@ -565,8 +564,13 @@
     .print .trim.down { height: .25in; margin-left: -.25pt; border-left: .5pt solid black; }
   }
 
+  .key-room { display: none; }
+
   @media (max-width: 700px) {
     .ui { bottom: .5em; padding: .75em; }
+    /* On a phone the machine spans the screen, so the Edit/Save key sits in its inner corner, over room kept for it */
+    .edit-key { right: 1.25em; bottom: 1.25em; padding: 0 .9em; }
+    body:not(.viewing) .key-room { display: block; height: 1.5em; }
     .chooser { padding: 1.5em 1em; .sheets { gap: 1.2em; } }
     .buttons { gap: .5em; }
   }
@@ -595,11 +599,10 @@
       <button id="new" title="Feed in a fresh page, at a new link">New</button>
       <button id="import" title="Open a Markdown or text file in place of this page">Import Markdown</button>
       <input type="file" id="importFile" accept=".md,.markdown,.txt,text/markdown,text/x-markdown,text/plain" hidden>
-      <span class="export">Export
-        <button id="download" title="Each page as a 600 dpi picture">PNG</button>
-        <button id="export" title="The text, as a Markdown file">Markdown</button>
-      </span>
+      <button id="download" title="Each page as a 600 dpi picture">Export PNG</button>
+      <button id="export" title="The text, as a Markdown file">Export Markdown</button>
       <button id="print" title="Print each sheet on paper of its own size">Print</button>
+      <span class="key-room"></span>
     </div>
   </div>
 </section>

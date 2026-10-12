@@ -2138,10 +2138,23 @@ setMode = (edit)->
     slideCarriage 0
   else
     save "current", pageId
+    makeRoom()
     render()
     input.focus preventScroll: true
     setSelection layout.n, layout.n
     updateFocus()
+
+# The Edit/Save key keeps to its corner, so while the machine's out, the machine stops short of it (or, on a phone,
+# keeps room for it at the end of its last row)
+keyRoom = $ ".key-room"
+makeRoom = ()->
+  deckElm.style.marginRight = ""
+  keyRoom.style.width = "#{editKey.offsetWidth}px"
+  return if viewing or matchMedia("(max-width: 700px)").matches
+  overlap = deckElm.getBoundingClientRect().right - (editKey.getBoundingClientRect().left - 12)
+  deckElm.style.marginRight = "#{overlap}px" if overlap > 0
+
+window.addEventListener "resize", makeRoom
 
 editKey.onclick = ()->
   unless viewing
