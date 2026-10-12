@@ -420,19 +420,6 @@
     button.active svg { stroke: hsl(30, 5%, 30%); }
   }
 
-  /* Paper size, written lightly in the corner of the sheet */
-  .paper-label {
-    position: absolute;
-    top: .6em;
-    right: .8em;
-    padding: .2em .3em;
-    border-radius: .3em;
-    font-size: .8rem;
-    color: hsl(30, 5%, 75%);
-    background: none;
-    &:hover { color: hsl(30, 5%, 50%); }
-  }
-
   /* Paper chooser — every kind of sheet laid out on the desk */
   .chooser {
     position: fixed;
@@ -554,6 +541,7 @@
   </div>
   <div class="ui">
     <div class="buttons">
+      <button id="paper" title="Paper">Letter</button>
       <button id="reset">Reset</button>
       <button id="download" title="Save each page as a picture">Save</button>
       <button id="markdown" title="Save the text as Markdown">Markdown</button>

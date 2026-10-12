@@ -13,7 +13,7 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
   done the typist's way, by striking another key over the letters. The alignment lever sets the paragraph you're in flush left, centred, or flush right.
 - The margin tabs, tab stops, and line space lever stay hidden until you point at the strip above a sheet or the margin
   to its left (on a phone, tap there).
-- Tap the paper size in the corner of the sheet to feed in a different kind of paper.
+- The paper key, on the left of the control bar, lays out every kind of paper on the desk to feed in.
 - The line space lever, under the top margin tab, sets single, 1½, or double spacing.
 - ⌘/Ctrl+Enter feeds a fresh sheet. Save downloads 600 dpi PNGs; Print prints at the exact sheet size.
 

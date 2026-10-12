@@ -514,10 +514,6 @@ makePageView = ()->
   canvas = document.createElement "canvas"
   guide = document.createElement "div"
   guide.className = "guide"
-  label = document.createElement "button"
-  label.className = "paper-label"
-  label.title = "Change paper"
-  label.onclick = openChooser
   edge = document.createElement "div"
   edge.className = "edge"
   strip = document.createElement "div"
@@ -530,9 +526,9 @@ makePageView = ()->
   bottom.dataset.kind = "bottom"
   spacing = makeLever "spacing", spacings, ((s)-> linesIcon 3 * s, "left"), ((s)-> changeSettings spacing: s)
   spacing.title = "Line spacing"
-  elm.append canvas, guide, label, edge, strip, top, bottom, spacing
+  elm.append canvas, guide, edge, strip, top, bottom, spacing
   pagesElm.insertBefore elm, selectionElm
-  {elm, canvas, guide, label, strip, top, bottom, spacing, ctx: canvas.getContext("2d"), key: null}
+  {elm, canvas, guide, strip, top, bottom, spacing, ctx: canvas.getContext("2d"), key: null}
 
 # Three little engraved lines, spaced apart by gap — flush left, centred, or flush right
 linesIcon = (gap, align)->
@@ -596,7 +592,6 @@ render = ()->
       top: g.top / linesPerInch * pxPerInch + "px"
       height: (textBottom - g.top / linesPerInch) * pxPerInch + "px"
 
-    view.label.textContent = paperName()
     view.top.style.top = g.top / linesPerInch * pxPerInch + "px"
     setFlag view.top, g.top, settings.linkTopBottom
     view.top.title = "Top margin: #{g.top} lines (#{fmt g.top / linesPerInch} in)"
@@ -1047,7 +1042,7 @@ alignments = ["left", "center", "right"]
 alignLever = makeLever "align", alignments, ((a)-> linesIcon 4, a), setAlign
 alignLever.title = "Flush left, centred, or flush right"
 alignLever.classList.add "spacer"
-$(".buttons").prepend alignLever
+$("#paper").after alignLever
 
 syncAlign = ()->
   setLever alignLever, alignments, alignAt doc.text, doc.styles, focusIndex()
@@ -1058,12 +1053,17 @@ paperName = ()->
   else
     papers[settings.paper].short + (if settings.landscape then " landscape" else "")
 
+# The paper key, on the left of the machine, shows what's in it and lays out the other kinds of paper to choose from
+paperKey = $ "#paper"
+paperKey.onclick = ()-> openChooser()
+
 syncControls = ()->
+  paperKey.textContent = paperName()
   renderChooser() unless chooser.hidden
   null
 
 # Hand the keyboard back to the page after pressing a key on the machine
-for elm in document.querySelectorAll ".buttons button"
+for elm in document.querySelectorAll ".buttons button:not(#paper)"
   elm.addEventListener "click", ()-> input.focus preventScroll: true
 
 $("#reset").onclick = ()->
@@ -1077,7 +1077,7 @@ $("#reset").onclick = ()->
 
 # PAPER CHOOSER ###################################################################################
 
-# Tap the paper size on the sheet, and every kind of paper is laid out on the desk, at true relative size.
+# Press the paper key, and every kind of paper is laid out on the desk, at true relative size.
 # Pick one to feed it in.
 
 chooserScale = 18 # CSS px per inch for the sheets on the desk
@@ -1165,7 +1165,7 @@ toolsPageAt = (e)->
   if zone = e.target.closest peripheral
     return zone.closest ".page"
   page = e.target.closest ".page"
-  return null unless page? and not e.target.closest ".paper-label"
+  return null unless page?
   rect = page.getBoundingClientRect()
   top = Math.max minimumBand, geo.top / linesPerInch * pxPerInch
   left = Math.max minimumBand, geo.left / charactersPerInch * pxPerInch
@@ -1446,7 +1446,7 @@ clickCount = (e)->
 
 pagesElm.addEventListener "pointerdown", (e)->
   return unless e.target.closest ".page"
-  return if e.target.closest ".paper-label, .strip, .vstop, .lever"
+  return if e.target.closest ".strip, .vstop, .lever"
   return if e.button isnt 0
 
   # On touch screens, a tap places the carriage, a sideways swipe slides the sheet, and an up-down drag scrolls
@@ -1495,7 +1495,7 @@ pagesElm.addEventListener "pointerup", (e)->
 
 # Mobile browsers follow a tap with a pretend mousedown that would pull focus off the page — stop it
 pagesElm.addEventListener "mousedown", (e)->
-  e.preventDefault() if e.target.closest(".page") and not e.target.closest(".paper-label")
+  e.preventDefault() if e.target.closest(".page")
 
 pagesElm.addEventListener "pointercancel", ()->
   pointer = null
