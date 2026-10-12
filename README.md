@@ -19,7 +19,8 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
 
 ## The text is Markdown
 
-What's on the page is stored, copied, and saved (with the Markdown button) as plain Markdown. The markers are invisible
+What's on the page is stored, copied, and exported (with the Export key) as plain Markdown. Import opens a Markdown or
+text file in its place — or drop one on the page — and Undo brings back what was there. The markers are invisible
 on the page and take up no room on the grid — and typing them by hand works too:
 
 | On the page | In Markdown |

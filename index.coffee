@@ -1063,7 +1063,7 @@ syncControls = ()->
   null
 
 # Hand the keyboard back to the page after pressing a key on the machine
-for elm in document.querySelectorAll ".buttons button:not(#paper)"
+for elm in document.querySelectorAll ".buttons button:not(#paper):not(#import)"
   elm.addEventListener "click", ()-> input.focus preventScroll: true
 
 $("#reset").onclick = ()->
@@ -1524,12 +1524,37 @@ $("#download").onclick = ()->
     setTimeout ((url)-> ()-> URL.revokeObjectURL url)(link.href), 1000
   null
 
-$("#markdown").onclick = ()->
+$("#export").onclick = ()->
   link = document.createElement "a"
   link.href = URL.createObjectURL new Blob [input.value], type: "text/markdown"
   link.download = "senatorial.md"
   link.click()
   setTimeout ((url)-> ()-> URL.revokeObjectURL url)(link.href), 1000
+
+# Import a Markdown (or plain text) file in place of what's on the page. It goes through the undo history,
+# so Undo brings back what was there. Dropping a file on the page does the same.
+importFile = $ "#importFile"
+$("#import").onclick = ()-> importFile.click()
+importFile.onchange = ()->
+  file = importFile.files[0]
+  importFile.value = ""
+  loadMarkdown await file.text() if file?
+
+isTextFile = (file)-> /\.(md|markdown|txt|text)$/i.test(file.name) or file.type.startsWith "text/"
+
+document.addEventListener "dragover", (e)->
+  e.preventDefault() if "Files" in Array.from e.dataTransfer?.types ? []
+document.addEventListener "drop", (e)->
+  file = Array.from(e.dataTransfer?.files ? []).find isTextFile
+  return unless file?
+  e.preventDefault()
+  loadMarkdown await file.text()
+
+loadMarkdown = (md)->
+  replaceRaw 0, input.value.length, md.replace /\r\n?/g, "\n"
+  setSelection 0, 0, false
+  slideCarriage 0
+  window.scrollTo 0, 0
 
 $("#print").onclick = ()->
   printElm = $ ".print"
