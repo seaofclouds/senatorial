@@ -13,6 +13,9 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
   done the typist's way, by striking another key over the letters. The alignment lever centres the paragraph you're in.
 - The margin tabs, tab stops, and line space lever stay hidden until you point at the strip above a sheet or the margin
   to its left (on a phone, tap there).
+- Tap the paper size in the corner of the sheet to feed in a different kind of paper.
+- The line space lever, under the top margin tab, sets single, 1½, or double spacing.
+- ⌘/Ctrl+Enter feeds a fresh sheet. Save downloads 600 dpi PNGs; Print prints at the exact sheet size.
 
 ## The text is Markdown
 
@@ -30,9 +33,6 @@ on the page and take up no room on the grid — and typing them by hand works to
 | Centred line | `->text<-` |
 
 Capitals are typed over the letters themselves, like shift lock. A backslash before a marker character prints it as is.
-- Tap the paper size in the corner of the sheet to feed in a different kind of paper.
-- The line space lever, under the top margin tab, sets single, 1½, or double spacing.
-- ⌘/Ctrl+Enter feeds a fresh sheet. Save downloads 600 dpi PNGs; Print prints at the exact sheet size.
 
 ## Running it
 
