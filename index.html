@@ -287,18 +287,24 @@
     position: absolute;
     z-index: 1;
     display: flex;
-    align-items: center;
+    flex-flow: column;
     gap: .4em;
     padding: .4em;
     border-radius: 1em;
     background: var(--body);
     box-shadow: 0 4px 14px #0003;
     white-space: nowrap;
-
-    flex-wrap: wrap;
     max-width: calc(100vw - 32px);
 
+    /* How it's struck on the first row, with the ribbon colour at the end; what's struck over it on the second,
+       with the alignment */
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: .4em; }
+    .row > :last-child { margin-left: auto; }
+
     button { font-size: .9rem; }
+    .lever button { height: 1.35rem; }
+    .light { font-weight: 300; }
+    .double { font-weight: 700; }
     .caps { letter-spacing: .06em; text-transform: uppercase; font-size: .8rem; }
     .underline { text-decoration: underline; text-underline-offset: 2px; }
     .strike { text-decoration: line-through; }
@@ -380,51 +386,37 @@
   }
 
   /* Line space lever, after the Olympia SM9 */
+  /* A lever is a plain pill with its settings engraved on it, the one it's set to inked in */
   .lever {
-    --position: 0;
-    position: relative;
     display: flex;
-    border: 4px solid hsl(18, 2%, 42%);
-    border-radius: 24px;
-    background: hsl(28, 3%, 14%);
-    box-shadow: 0 0 0 2px #0003 inset;
-
-    .knob {
-      position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 16px;
-      height: 16px;
-      border-radius: 10px;
-      background: hsl(28, 1%, 48%);
-      translate: calc(var(--position) * 22px);
-      transition: translate .1s;
-      pointer-events: none;
-    }
+    align-items: center;
+    padding: 0 5px;
+    border-radius: 1em;
+    background: var(--key);
 
     button {
-      position: relative;
-      width: 22px;
-      height: 20px;
+      width: 24px;
+      height: 1.5rem;
       padding: 0;
-      border-radius: 10px;
+      border-radius: 0;
       background: none;
     }
 
     svg {
       display: block;
-      width: 20px;
-      height: 20px;
-      stroke: hsl(28, 1%, 40%);
+      width: 18px;
+      height: 18px;
+      margin: auto;
+      stroke: hsl(38, 2%, 62%);
       stroke-width: 1.5;
       stroke-linecap: round;
     }
 
-    button.active svg { stroke: hsl(28, 3%, 14%); }
+    button.active svg { stroke: var(--key-text); }
   }
 
-  /* On the sheet, the line space lever stands upright along the left edge, under the top margin tab —
-     a plain pill the same width as the tabs, with the settings engraved right on it */
+  /* On the sheet, the line space lever stands upright along the left edge, under the top margin tab,
+     the same width as the tabs */
   .lever.spacing {
     position: absolute;
     right: 100%;
@@ -432,17 +424,14 @@
     flex-flow: column;
     width: 22px;
     padding: 6px 0;
-    border: 0;
     border-radius: 11px;
     background: hsl(36, 10%, 82%);
-    box-shadow: none;
     opacity: .7;
     transition: opacity .15s;
     &:hover { opacity: 1; }
 
-    .knob { display: none; }
     button { width: 22px; height: 18px; }
-    svg { width: 16px; height: 18px; margin: auto; stroke: hsl(30, 5%, 64%); }
+    svg { width: 16px; height: 18px; stroke: hsl(30, 5%, 64%); }
     button.active svg { stroke: hsl(30, 5%, 30%); }
   }
 
@@ -579,14 +568,18 @@
     <div class="selection"></div>
     <div class="caret"></div>
     <div class="format" hidden>
-      <button data-weight="regular">Regular</button>
-      <button data-weight="light">Light</button>
-      <button data-weight="double">Double Struck</button>
-      <button data-caps class="caps" title="Capitals — typed over the letters, like shift lock">Caps</button>
-      <button data-toggle="underline" class="underline" title="Underline — an underscore struck over each letter">Underline</button>
-      <button data-toggle="strike" class="strike" title="Strike through — a hyphen struck over each letter">Strike</button>
-      <button data-toggle="xout" class="xout" title="X out — an X struck over each letter">X-out</button>
-      <button data-toggle="red" class="red" title="Red ribbon"></button>
+      <div class="row">
+        <button data-weight="regular">Regular</button>
+        <button data-weight="light" class="light">Light</button>
+        <button data-weight="double" class="double">Double Struck</button>
+        <button data-caps class="caps" title="Capitals — typed over the letters, like shift lock">Caps</button>
+        <button data-toggle="red" class="red" title="Red ribbon"></button>
+      </div>
+      <div class="row">
+        <button data-toggle="underline" class="underline" title="Underline — an underscore struck over each letter">Underline</button>
+        <button data-toggle="strike" class="strike" title="Strike through — a hyphen struck over each letter">Strike</button>
+        <button data-toggle="xout" class="xout" title="X out — an X struck over each letter">X-out</button>
+      </div>
     </div>
     <textarea class="input" autofocus spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
   </div>

@@ -908,7 +908,6 @@ linesIcon = (gap, align)->
 makeLever = (name, values, icon, choose)->
   lever = document.createElement "div"
   lever.className = "lever #{name}"
-  lever.innerHTML = "<span class='knob'></span>"
   for value in values
     do (value)->
       btn = document.createElement "button"
@@ -921,7 +920,6 @@ makeLever = (name, values, icon, choose)->
 
 setLever = (lever, values, value)->
   k = Math.max 0, values.indexOf value
-  lever.style.setProperty "--position", k
   btn.classList.toggle "active", i is k for btn, i in lever.querySelectorAll "button"
   null
 
@@ -1501,7 +1499,7 @@ renderFormatMenu = ()->
   left = clamp first.x, 8 - carriageX, pagesElm.clientWidth - carriageX - formatMenu.offsetWidth - 8
   Object.assign formatMenu.style, left: left + "px", top: top + "px"
 
-for btn in formatMenu.querySelectorAll "button"
+for btn in formatMenu.querySelectorAll ".row > button"
   btn.addEventListener "pointerdown", (e)-> e.preventDefault() # Keep the selection while choosing
   do (btn)-> btn.onclick = ()->
     if btn.dataset.weight?
@@ -1566,10 +1564,15 @@ alignLever = makeLever "align", alignments, ((a)-> linesIcon 4, a), setAlign
 alignLever.title = "Flush left, centred, or flush right"
 alignLever.classList.add "spacer"
 $("#paper").after alignLever
+# and the same again on the menu over a selection
+menuAlignLever = makeLever "align", alignments, ((a)-> linesIcon 4, a), setAlign
+menuAlignLever.title = alignLever.title
+formatMenu.querySelector(".row:last-child").append menuAlignLever
 
 syncAlign = ()->
   k = focusIndex()
-  setLever alignLever, alignments, if inTable k then columnAlignAt k else alignAt doc.text, doc.styles, k
+  align = if inTable k then columnAlignAt k else alignAt doc.text, doc.styles, k
+  setLever lever, alignments, align for lever in [alignLever, menuAlignLever]
 
 paperName = ()->
   if settings.paper is "custom"
