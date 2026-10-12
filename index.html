@@ -128,6 +128,29 @@
 
   /* MARGIN & TAB STOPS — light tabs, rounded on the outside, pointing at exactly where each margin falls */
 
+  /* They stay out of sight until you come near the edge of the sheet: the strip above it, or the margin to its left */
+  .edge {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    width: 72px;
+  }
+
+  .strip > *, .page > .flag, .page > .lever.spacing {
+    visibility: hidden;
+    filter: opacity(0);
+    transition: filter .25s, opacity .15s, visibility 0s .25s;
+  }
+
+  .page.tools {
+    .strip > *, > .flag, > .lever.spacing {
+      visibility: visible;
+      filter: none;
+      transition: filter .25s, opacity .15s;
+    }
+  }
+
   /* The strip along the top of each sheet holds the left & right margins, tab stops, and centre mark */
   .strip {
     position: absolute;
@@ -252,6 +275,7 @@
     button { font-size: .9rem; }
     .caps { letter-spacing: .06em; text-transform: uppercase; font-size: .8rem; }
     .underline { text-decoration: underline; text-underline-offset: 2px; }
+    .strike { text-decoration: line-through; }
 
     .red {
       width: 1.5em;
@@ -520,20 +544,19 @@
       <button data-weight="regular">Regular</button>
       <button data-weight="light">Light</button>
       <button data-weight="double">Double Struck</button>
-      <button data-toggle="caps" class="caps" title="All capitals">Caps</button>
+      <button data-caps class="caps" title="Capitals — typed over the letters, like shift lock">Caps</button>
       <button data-toggle="underline" class="underline" title="Underline — an underscore struck over each letter">Underline</button>
+      <button data-toggle="strike" class="strike" title="Strike through — a hyphen struck over each letter">Strike</button>
+      <button data-toggle="xout" class="xout" title="X out — an X struck over each letter">X-out</button>
       <button data-toggle="red" class="red" title="Red ribbon"></button>
     </div>
     <textarea class="input" autofocus spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
   </div>
   <div class="ui">
     <div class="buttons">
-      <button id="regular" class="active">Regular</button>
-      <button id="light">Light</button>
-      <button id="double">Double Struck</button>
-      <input type="checkbox" id="red" class="toggle spacer" role="switch" title="Red ribbon">
       <button id="reset">Reset</button>
-      <button id="download">Save</button>
+      <button id="download" title="Save each page as a picture">Save</button>
+      <button id="markdown" title="Save the text as Markdown">Markdown</button>
       <button id="print">Print</button>
     </div>
   </div>

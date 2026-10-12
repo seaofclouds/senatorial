@@ -9,8 +9,27 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
   far in it is from its own edge — drag them. Click a tab's link to tie it to the opposite margin, so the two mirror each other.
 - Click the strip above the sheet to set a tab stop; drag one away to clear it. The mark in the middle is the sheet's centre.
 - On a phone, swipe sideways to slide the sheet.
-- Select text to restrike it light, double struck, in red, in capitals, or underlined (an underscore struck over each
-  letter, the way a typist would). The alignment lever centres the paragraph you're in.
+- Select text to restrike it light, double struck, in red, in capitals, underlined, struck through, or X'd out — each
+  done the typist's way, by striking another key over the letters. The alignment lever centres the paragraph you're in.
+- The margin tabs, tab stops, and line space lever stay hidden until you point at the strip above a sheet or the margin
+  to its left (on a phone, tap there).
+
+## The text is Markdown
+
+What's on the page is stored, copied, and saved (with the Markdown button) as plain Markdown. The markers are invisible
+on the page and take up no room on the grid — and typing them by hand works too:
+
+| On the page | In Markdown |
+| --- | --- |
+| Double struck | `**text**` |
+| Light | `` `text` `` |
+| Underlined | `_text_` or `*text*` |
+| Red ribbon | `==text==` |
+| Struck through | `~~text~~` |
+| X'd out | `~~~text~~~` |
+| Centred line | `->text<-` |
+
+Capitals are typed over the letters themselves, like shift lock. A backslash before a marker character prints it as is.
 - Tap the paper size in the corner of the sheet to feed in a different kind of paper.
 - The line space lever, under the top margin tab, sets single, 1½, or double spacing.
 - ⌘/Ctrl+Enter feeds a fresh sheet. Save downloads 600 dpi PNGs; Print prints at the exact sheet size.

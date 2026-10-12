@@ -37,9 +37,6 @@ defaults =
   linkLeftRight: false # when linked, the left & right margins mirror each other
   linkTopBottom: false # and the same for the top & bottom
   tabs: [] # tab stops, in columns from the left edge of the paper. When empty, there's a stop every 5 columns.
-  atlas: "regular"
-  red: false
-  center: false # how the very first line is aligned, before anything's been typed
 
 defaultTabInterval = 5
 
@@ -118,34 +115,6 @@ glyph = (c)->
     [gx, gy] = getGlyphPosInAtlas "*" unless gx? and gy?
     [gx, gy]
 
-# Every character remembers how it was struck: regular, light, or double struck, on the black or red half of the ribbon,
-# in capitals or not, underscored or not, and whether its paragraph is centred.
-# Styles are kept as a string running alongside the text, with each character's style packed into one character code.
-weights = ["regular", "light", "double"]
-encodeStyle = ({weight, red, center, caps, underline})->
-  String.fromCharCode 48 + weights.indexOf(weight) * 2 + (if red then 1 else 0) + (if center then 6 else 0) +
-    (if caps then 12 else 0) + (if underline then 24 else 0)
-decodeStyle = (code)->
-  v = code.charCodeAt(0) - 48
-  weight: weights[(v % 6) >> 1], red: (v & 1) is 1, center: v % 12 >= 6, caps: v % 24 >= 12, underline: v >= 24
-styleCenter = (code)-> decodeStyle(code).center
-
-# A paragraph runs up to & including its carriage return (or form feed)
-breaks = ["\n", "\f"]
-paragraphStart = (text, i)->
-  i-- while i > 0 and text[i - 1] not in breaks
-  i
-paragraphEnd = (text, i)->
-  i++ while i < text.length and text[i] not in breaks
-  Math.min i + 1, text.length
-
-# A paragraph's alignment is carried by its first character. An empty last line follows the line before it.
-centeredAt = (text, codes, i)->
-  s = paragraphStart text, i
-  if s < text.length then styleCenter codes[s]
-  else if s > 0 then styleCenter codes[s - 1]
-  else settings.center
-
 # These images store the glyph atlases, one per strike & ribbon colour
 atlases = {}
 atlasNames = ["regular", "light", "double", "regular-red", "light-red"]
@@ -166,6 +135,234 @@ loadAtlases = ()->
         document.body.classList.add "ready" if ++loaded is atlasNames.length
       img.src = "glyphs/#{name}.png"
 
+# STYLE ###########################################################################################
+
+# Every character on the page remembers how it was struck: regular, light, or double struck, on the black or red half
+# of the ribbon, underlined, struck through, or X'd out — and whether its paragraph is centred.
+# Each character's style is packed into one character code, so a document's styles are a string alongside its text.
+weights = ["regular", "light", "double"]
+flags = ["red", "center", "underline", "strike", "xout"]
+encodeStyle = (style)->
+  v = Math.max 0, weights.indexOf style.weight
+  v |= 4 << k for flag, k in flags when style[flag]
+  String.fromCharCode 48 + v
+decodeStyle = (code)->
+  v = code.charCodeAt(0) - 48
+  style = weight: weights[v & 3] ? "regular"
+  style[flag] = (v & (4 << k)) isnt 0 for flag, k in flags
+  style
+styleCenter = (code)-> decodeStyle(code).center
+
+# A paragraph runs up to & including its carriage return (or form feed)
+breaks = ["\n", "\f"]
+paragraphStart = (text, i)->
+  i-- while i > 0 and text[i - 1] not in breaks
+  i
+paragraphEnd = (text, i)->
+  i++ while i < text.length and text[i] not in breaks
+  Math.min i + 1, text.length
+
+# A paragraph's alignment is carried by its first character, or its carriage return if it's empty.
+# The styles string has one extra entry past the end of the text, which carries the alignment of an empty last line.
+centeredAt = (text, codes, i)-> styleCenter codes[paragraphStart text, i] ? encodeStyle {}
+
+# MARKDOWN ########################################################################################
+
+# The text behind the page is Markdown. Its markers are invisible on the page and take up no room on the grid:
+#   **double struck**   `light`   _underlined_ (or *underlined*)   ==red ribbon==
+#   ~~struck through~~   ~~~X'd out~~~   and a whole line wrapped in -> and <- is centred
+# A backslash makes the next marker character print as itself.
+
+delimiters = # marker character → length of the run → what it does
+  "*": {1: "underline", 2: "double"}
+  "_": {1: "underline", 2: "double"}
+  "`": {1: "light"}
+  "=": {2: "red"}
+  "~": {2: "strike", 3: "xout"}
+escapable = "*_`=~\\-<"
+wordChar = /[\p{L}\p{N}]/u
+blankChar = /\s/
+
+# Read one line (without its line break). kinds says what each raw character is: "text" (printed), "open" or
+# "close" (an inline marker), "blockOpen" or "blockClose" (the centring arrows), or "escape" (a backslash).
+parseLine = (line)->
+  n = line.length
+  kinds = new Array(n).fill "text"
+  start = 0
+  end = n
+  center = n >= 4 and line.startsWith("->") and line.endsWith("<-")
+  if center
+    kinds[0] = kinds[1] = "blockOpen"
+    kinds[n - 2] = kinds[n - 1] = "blockClose"
+    start = 2
+    end = n - 2
+
+  # Find the runs of marker characters that could open or close a span
+  tokens = []
+  i = start
+  while i < end
+    c = line[i]
+    if c is "\\" and i + 1 < end and line[i + 1] in escapable
+      kinds[i] = "escape"
+      i += 2
+    else if delimiters[c]?
+      j = i
+      j++ while j < end and line[j] is c
+      if type = delimiters[c][j - i]
+        before = if i > start then line[i - 1] else " "
+        after = if j < end then line[j] else " "
+        canOpen = not blankChar.test after
+        canClose = not blankChar.test before
+        if c is "_" # Underscores inside a word stay underscores, like snake_case
+          canOpen and= not wordChar.test before
+          canClose and= not wordChar.test after
+        tokens.push {at: i, len: j - i, key: c + (j - i), type, canOpen, canClose}
+      i = j
+    else
+      i++
+
+  # Pair them up, innermost first, like Markdown does
+  spans = []
+  stack = []
+  for t in tokens
+    k = -1
+    if t.canClose
+      k = stack.length - 1
+      k-- while k >= 0 and stack[k].key isnt t.key
+    if k >= 0
+      o = stack[k]
+      stack.length = k
+      spans.push {from: o.at + o.len, to: t.at, type: t.type}
+      kinds[x] = "open" for x in [o.at...o.at + o.len]
+      kinds[x] = "close" for x in [t.at...t.at + t.len]
+    else if t.canOpen
+      stack.push t
+
+  # Each printed character takes on the style of every span it's in — the innermost wins for the strike
+  styles = new Array n
+  styles[x] = {weight: "regular", center} for x in [0...n] when kinds[x] is "text"
+  spans.sort (a, b)-> (b.to - b.from) - (a.to - a.from)
+  for span in spans
+    for x in [span.from...span.to] when kinds[x] is "text"
+      if span.type in weights then styles[x].weight = span.type else styles[x][span.type] = true
+  {kinds, styles, center}
+
+# Read a whole document: the printed text, a style for each printed character (plus one for the end),
+# where each printed character sits in the Markdown, and what every Markdown character is
+parseMarkdown = (raw)->
+  chars = []
+  codes = []
+  rawOf = []
+  kinds = []
+  visBefore = new Array raw.length + 1
+  lineStart = 0
+  loop
+    b = lineStart
+    b++ while b < raw.length and raw[b] not in breaks
+    line = parseLine raw.slice lineStart, b
+    for kind, x in line.kinds
+      visBefore[lineStart + x] = chars.length
+      kinds.push kind
+      if kind is "text"
+        chars.push raw[lineStart + x]
+        codes.push encodeStyle line.styles[x]
+        rawOf.push lineStart + x
+    break if b is raw.length
+    visBefore[b] = chars.length
+    kinds.push "text"
+    chars.push raw[b]
+    codes.push encodeStyle center: line.center
+    rawOf.push b
+    lineStart = b + 1
+  visBefore[raw.length] = chars.length
+  rawOf.push raw.length
+  codes.push encodeStyle center: line.center # The end of the text carries the last line's alignment
+  {raw, text: chars.join(""), styles: codes.join(""), rawOf, kinds, visBefore}
+
+# Spans open outermost-first in this order, so light text with an underline reads `_like this_`
+spanOrder = ["light", "double", "underline", "red", "strike", "xout"]
+hasSpan = (style, type)-> if type in weights then style.weight is type else style[type]
+
+markerFor = (type, opts)-> switch type
+  when "light" then "`"
+  when "double" then "**"
+  when "underline" then opts.underline
+  when "red" then "=="
+  when "strike" then "~~"
+  when "xout" then "~~~"
+
+# Markdown can't start or end a span on a space, so spans shrink to fit the words inside them
+trimSpans = (chars, styles)->
+  for type in spanOrder
+    i = 0
+    while i < chars.length
+      unless hasSpan styles[i], type
+        i++
+        continue
+      j = i
+      j++ while j < chars.length and hasSpan styles[j], type
+      a = i
+      a++ while a < j and blankChar.test chars[a]
+      z = j
+      z-- while z > a and blankChar.test chars[z - 1]
+      for x in [i...a].concat [z...j]
+        if type in weights then styles[x].weight = "regular" else styles[x][type] = false
+      i = j
+  styles
+
+writeLine = (chars, styles, center, opts)->
+  out = ""
+  stack = []
+  for c, i in chars
+    want = (type for type in spanOrder when hasSpan styles[i], type)
+    # Close any span that's ending (and whatever's nested inside it), then open the ones that are starting
+    k = stack.findIndex (type)-> type not in want
+    if k >= 0
+      out += markerFor type, opts for type in stack.slice(k).reverse()
+      stack.length = k
+    for type in want when type not in stack
+      out += markerFor type, opts
+      stack.push type
+    out += if opts.escape and c in escapable then "\\" + c else c
+  out += markerFor type, opts for type in stack.slice().reverse()
+  if center
+    "->#{out}<-"
+  else if out.startsWith("->") and out.endsWith("<-")
+    "\\" + out # Don't let it read as centred
+  else
+    out
+
+# Write one line of styled characters as Markdown, and check it reads back the same.
+# If it doesn't (say, a stray asterisk that would pair up), try escaping the marker characters.
+serializeLine = (chars, codes, center)->
+  styles = trimSpans chars, (decodeStyle c for c in codes)
+  want = (encodeStyle Object.assign s, {center} for s in styles).join ""
+  attempts = [{underline: "_"}, {underline: "*"}, {underline: "_", escape: true}, {underline: "*", escape: true}]
+  for opts in attempts
+    md = writeLine chars, styles, center, opts
+    back = parseLine md
+    printed = (md[x] for kind, x in back.kinds when kind is "text").join ""
+    codesBack = (encodeStyle back.styles[x] for kind, x in back.kinds when kind is "text").join ""
+    return md if printed is chars.join("") and codesBack is want and back.center is center
+  md
+
+# Write a run of whole paragraphs back into Markdown. codes has a style for each character — plus one more when the
+# run reaches the end of the document, for its last line.
+serializeBlock = (text, codes)->
+  out = ""
+  i = 0
+  loop
+    j = i
+    j++ while j < text.length and text[j] not in breaks
+    center = styleCenter codes[i]
+    out += serializeLine Array.from(text.slice i, j), codes.slice(i, j), center
+    break if j is text.length
+    out += text[j]
+    i = j + 1
+    # A block that ends on a line break stops there — unless it's the end of the document, whose last line can be empty
+    break if i is text.length and not codes[i]?
+  out
+
 # LAYOUT ##########################################################################################
 
 # Works out where every character lands: [page, line, col] for each index in the text,
@@ -174,7 +371,7 @@ loadAtlases = ()->
 layout = null
 
 doLayout = (g)->
-  text = input.value
+  text = doc.text
   n = text.length
   pos = new Array n + 1
   lines = [] # {page, line, start, end} — the range of indices whose caret position is on each line
@@ -204,7 +401,7 @@ doLayout = (g)->
     else
       if page isnt last?.page
         pages.push {start: i, firstLine: lines.length}
-      lines.push {page, line, start: i, end: i, center: centeredAt text, styles, i}
+      lines.push {page, line, start: i, end: i, center: centeredAt text, doc.styles, i}
 
   i = 0
   while i < n
@@ -288,7 +485,6 @@ formatMenu = $ ".format"
 pageViews = []
 renderVersion = 0
 geo = null
-styles = "" # one style per character of the text — see encodeStyle
 
 # Sheets are shown at actual size, so the type reads the way it would on the desk.
 # A CSS inch isn't a real inch (it's about ⅗" on a phone), so this uses typical real screen densities instead.
@@ -314,6 +510,8 @@ makePageView = ()->
   label.className = "paper-label"
   label.title = "Change paper"
   label.onclick = openChooser
+  edge = document.createElement "div"
+  edge.className = "edge"
   strip = document.createElement "div"
   strip.className = "strip"
   top = document.createElement "div"
@@ -324,7 +522,7 @@ makePageView = ()->
   bottom.dataset.kind = "bottom"
   spacing = makeLever "spacing", spacings, ((s)-> linesIcon 3 * s, "left"), ((s)-> changeSettings spacing: s)
   spacing.title = "Line spacing"
-  elm.append canvas, guide, label, strip, top, bottom, spacing
+  elm.append canvas, guide, label, edge, strip, top, bottom, spacing
   pagesElm.insertBefore elm, selectionElm
   {elm, canvas, guide, label, strip, top, bottom, spacing, ctx: canvas.getContext("2d"), key: null}
 
@@ -400,7 +598,7 @@ render = ()->
 
     # Only redraw pages whose contents actually changed
     {start, end} = layout.pages[p]
-    key = "#{renderVersion}|#{pw}|#{layout.text.slice start, end}|#{styles.slice start, end}"
+    key = "#{renderVersion}|#{pw}|#{layout.text.slice start, end}|#{doc.styles.slice start, end}"
     unless view.key is key
       view.key = key
       drawPage view.ctx, p, pw / g.w
@@ -431,17 +629,18 @@ drawPage = (ctx, p, ppi)->
   for i in [start...Math.min end, layout.n]
     c = text[i]
     continue if c in ["\n", "\t", "\f"]
-    style = decodeStyle styles[i]
+    style = decodeStyle doc.styles[i]
     img = atlasFor style
     continue unless img?
     [_, line, col] = layout.pos[i]
     px = col * gw
     py = lineTop(geo, line) * atlasDPI + verticalAlign
-    unless c is " "
-      c = c.toUpperCase() if style.caps and c.toUpperCase().length is 1
-      strike img, c, px, py
-    # Underlining is done the typist's way: an underscore struck over the same spot, ink on ink
+    strike img, c, px, py unless c is " "
+    # Underlining, striking through, and X-ing out are done the typist's way:
+    # another key struck over the same spot, ink on ink
     strike img, "_", px, py if style.underline
+    strike img, "-", px, py if style.strike
+    strike img, "X", px, py if style.xout
   null
 
 # Along the top of each sheet: the left & right margin tabs, the tab stops, and the centre mark
@@ -493,12 +692,19 @@ caretPoint = (i)->
   h: pxPerInch / linesPerInch
 
 focusIndex = ()->
-  Math.min (if input.selectionDirection is "backward" then input.selectionStart else input.selectionEnd), layout.n
+  Math.min visAt(if input.selectionDirection is "backward" then input.selectionStart else input.selectionEnd), layout.n
+
+# Keep a lone caret out of the middle of a marker, so whatever's typed lands where it looks like it will
+normalizeCaret = ()->
+  r = input.selectionStart
+  return unless r is input.selectionEnd
+  c = rawAt visAt r
+  input.setSelectionRange c, c unless c is r
 
 renderSelection = ()->
   return unless layout? and pageViews.length
-  a = input.selectionStart
-  b = input.selectionEnd
+  normalizeCaret() unless applying
+  [a, b] = selected()
 
   # Caret goes on the moving end of the selection
   focus = focusIndex()
@@ -558,77 +764,189 @@ scrollCaretIntoView = ()->
   else if r.top < 48
     window.scrollBy 0, r.top - 48
 
-# STYLES ##########################################################################################
+# EDITING #########################################################################################
 
-saveStyles = ()->
-  try localStorage.setItem "styles", styles
+# The hidden textarea holds the Markdown, the selection, and the undo history. Everything else works in terms of the
+# printed text — what's actually on the page — and maps back to the Markdown underneath.
+doc = parseMarkdown ""
+reparse = ()-> doc = parseMarkdown input.value
 
-typingStyle = (center = false)-> encodeStyle weight: settings.atlas, red: settings.red, center: center
+# Where the caret sits in the Markdown when it's before printed character k. At the edge of a span, the caret stays
+# outside it — so typing after an underlined word isn't underlined, the way it would be on the machine — but inside
+# the centring arrows, and never between a backslash and the character it escapes.
+rawAt = (k)->
+  r = doc.rawOf[clamp k, 0, doc.text.length]
+  r++ while r < doc.kinds.length and doc.kinds[r] in ["close", "blockOpen"]
+  r-- while r > 0 and doc.kinds[r - 1] in ["open", "blockClose", "escape"]
+  r
+visAt = (r)-> doc.visBefore[clamp r, 0, doc.raw.length]
 
-# Keep the styles lined up with the text after every edit. The edit can't begin after where the
-# selection started, which pins down where a repeated letter was inserted.
-lastText = ""
-editStart = 0
-input.addEventListener "beforeinput", ()-> editStart = input.selectionStart
+# The selection, in printed characters
+selected = ()-> [visAt(input.selectionStart), visAt(input.selectionEnd)]
 
-syncStyles = ()->
-  text = input.value
-  old = lastText
-  limit = Math.min old.length, text.length, editStart
-  p = 0
-  p++ while p < limit and old[p] is text[p]
-  s = 0
-  s++ while s < Math.min(old.length, text.length) - p and old[old.length - 1 - s] is text[text.length - 1 - s]
-  inserted = text.length - p - s
-  # New letters take on the alignment of the paragraph they're typed into
-  center = centeredAt old, styles, p
-  styles = styles.slice(0, p) + typingStyle(center).repeat(inserted) + styles.slice(old.length - s)
-  lastText = text
-  saveStyles()
+applying = false
+
+# Swap a stretch of the Markdown for something else, through the browser so it lands in the undo history
+replaceRaw = (start, end, str)->
+  return if input.value.slice(start, end) is str
+  applying = true
+  input.focus preventScroll: true
+  input.setSelectionRange start, end
+  done = if str.length then document.execCommand "insertText", false, str else document.execCommand "delete"
+  unless done
+    input.setRangeText str, start, end, "end"
+    input.dispatchEvent new Event "input"
+  applying = false
+
+# Replace printed characters [a, b) with ins (styled insCodes), then rewrite every paragraph it touched as Markdown,
+# so spans stay balanced however the text around them changes
+edit = (a, b, ins, insCodes, select, endCenter, follow = true)->
+  {text, styles} = doc
+  newText = text.slice(0, a) + ins + text.slice(b)
+  newCodes = styles.slice(0, a) + insCodes + styles.slice(b)
+  if endCenter?
+    newCodes = newCodes.slice(0, -1) + encodeStyle Object.assign decodeStyle(newCodes.slice -1), center: endCenter
+  start = paragraphStart text, a
+  end = paragraphEnd text, b
+  newEnd = end + ins.length - (b - a)
+  rawStart = if start is 0 then 0 else doc.rawOf[start - 1] + 1
+  rawEnd = if end is text.length then doc.raw.length else doc.rawOf[end - 1] + 1
+  codes = newCodes.slice start, newEnd + (if end is text.length then 1 else 0)
+  replaceRaw rawStart, rawEnd, serializeBlock newText.slice(start, newEnd), codes
+  [anchor, focus] = select ? [a + ins.length, a + ins.length]
+  setSelection anchor, focus, follow
+
+# Type over the selection (or into an empty centred line), keeping the style of what's being replaced
+typeText = (str)->
+  [a, b] = selected()
+  style = if a < b then decodeStyle doc.styles[a] else {}
+  style.center = centeredAt doc.text, doc.styles, a
+  edit a, b, str, encodeStyle(style).repeat(str.length)
+
+isBlank = (c)-> c? and blankChar.test(c) and c not in breaks
+
+# Delete the way the key says to, a printed character (or word, or line) at a time
+deleteFor = (inputType)->
+  [a, b] = selected()
+  return edit a, b, "", "" if a < b
+  {text} = doc
+  k = a
+  [from, to] = switch inputType
+    when "deleteContentBackward" then [k - 1, k]
+    when "deleteContentForward" then [k, k + 1]
+    when "deleteWordBackward"
+      j = k
+      j-- while j > 0 and isBlank text[j - 1]
+      j-- while j > 0 and not blankChar.test text[j - 1]
+      j = k - 1 if j is k
+      [j, k]
+    when "deleteWordForward"
+      j = k
+      j++ while j < text.length and isBlank text[j]
+      j++ while j < text.length and not blankChar.test text[j]
+      j = k + 1 if j is k
+      [k, j]
+    when "deleteSoftLineBackward", "deleteHardLineBackward"
+      ln = layout.lines[lineIndexOf k]
+      [(if ln.start < k then ln.start else k - 1), k]
+    when "deleteSoftLineForward", "deleteHardLineForward"
+      ln = layout.lines[lineIndexOf k]
+      [k, (if ln.end > k then ln.end else k + 1)]
+    else [k, k]
+  from = clamp from, 0, text.length
+  to = clamp to, 0, text.length
+  edit from, to, "", "", [from, from] if from < to
+
+# Every edit that could split or join a span goes through the paragraph rewriter. Plain typing goes straight in, so
+# typing Markdown by hand works too.
+input.addEventListener "beforeinput", (e)->
+  return if applying
+  [a, b] = selected()
+  t = e.inputType
+  emptyCentredLine = a is b and centeredAt(doc.text, doc.styles, a) and paragraphStart(doc.text, a) is a and doc.text[a] in [undefined, "\n", "\f"] and
+    not input.value.slice(0, input.selectionStart).endsWith "->"
+  if t in ["insertText", "insertReplacementText"] and (a < b or emptyCentredLine)
+    e.preventDefault()
+    typeText e.data ? e.dataTransfer?.getData("text/plain") ? ""
+  else if t in ["insertLineBreak", "insertParagraph"]
+    e.preventDefault()
+    typeText "\n"
+  else if t.startsWith "delete"
+    e.preventDefault()
+    deleteFor t
+  else if t is "insertFromPaste" and a < b
+    # Clear the selection the careful way first, then let the paste (which may be Markdown) land
+    e.preventDefault()
+    pasted = e.dataTransfer?.getData("text/plain") ? ""
+    edit a, b, "", ""
+    replaceRaw input.selectionStart, input.selectionStart, pasted
+
+# Copy and cut write well-formed Markdown, even when the selection starts or ends inside a span
+copyMarkdown = (e)->
+  [a, b] = selected()
+  return false unless a < b
+  e.preventDefault()
+  e.clipboardData.setData "text/plain", serializeBlock doc.text.slice(a, b), doc.styles.slice(a, b) + encodeStyle {}
+  true
+input.addEventListener "copy", copyMarkdown
+input.addEventListener "cut", (e)->
+  if copyMarkdown e
+    [a, b] = selected()
+    edit a, b, "", ""
 
 # Restyle the selected characters
-restyle = (fn)->
-  a = input.selectionStart
-  b = input.selectionEnd
-  return false unless a < b
-  styles = styles.slice(0, a) + (fn c for c in styles.slice a, b).join("") + styles.slice(b)
-  saveStyles()
-  render()
-  true
+restyleWith = (changes)->
+  [a, b] = selected()
+  return unless a < b
+  [anchor, focus] = getAnchorFocus()
+  codes = (encodeStyle Object.assign decodeStyle(c), changes for c in doc.styles.slice a, b).join ""
+  edit a, b, doc.text.slice(a, b), codes, [anchor, focus], null, false # Restyling leaves the carriage where it is
 
-restyleWith = (changes)-> restyle (c)-> encodeStyle Object.assign decodeStyle(c), changes
-setWeight = (weight)-> restyleWith {weight}
-setRed = (red)-> restyleWith {red}
+# Capitals are typed over the letters themselves, like shift lock. Pressing Caps again puts back the letters as they
+# were, as long as this session remembers them; otherwise they go to lower case. Undo always works too.
+capsMemory = new Map()
+sameLength = (str, fn)-> (for c in str then (if fn(c).length is 1 then fn(c) else c)).join ""
+toUpper = (str)-> sameLength str, (c)-> c.toUpperCase()
+toLower = (str)-> sameLength str, (c)-> c.toLowerCase()
+isCaps = (str)-> /\p{L}/u.test(str) and toUpper(str) is str
+
+toggleCaps = ()->
+  [a, b] = selected()
+  return unless a < b
+  [anchor, focus] = getAnchorFocus()
+  seg = doc.text.slice a, b
+  if isCaps seg
+    replacement = capsMemory.get(seg) ? toLower seg
+  else
+    replacement = toUpper seg
+    capsMemory.set replacement, seg
+  edit a, b, replacement, doc.styles.slice(a, b), [anchor, focus], null, false
 
 # Centre (or un-centre) every paragraph the selection touches — or just the one the caret is in
 setCenter = (center)->
-  text = input.value
-  a = input.selectionStart
-  b = input.selectionEnd
+  [a, b] = selected()
+  [anchor, focus] = getAnchorFocus()
+  text = doc.text
   b-- if b > a and text[b - 1] in breaks # A selection ending just after a carriage return stops at that line
   start = paragraphStart text, a
-  start-- if start is text.length and start > 0 # An empty last line takes its alignment from the line before
   end = paragraphEnd text, b
-  styles = styles.slice(0, start) + (encodeStyle Object.assign decodeStyle(c), {center} for c in styles.slice start, end).join("") + styles.slice(end)
-  settings.center = center if text.length is 0 # Nothing typed yet, so remember it for the first line
-  saveStyles()
-  save "settings", settings
-  render()
-  syncControls()
+  codes = (encodeStyle Object.assign decodeStyle(c), {center} for c in doc.styles.slice start, end).join ""
+  endCenter = if end is text.length then center else null
+  edit start, end, text.slice(start, end), codes, [anchor, focus], endCenter, false
 
 # A little menu that pops up over a selection, for striking it differently
 renderFormatMenu = ()->
-  a = input.selectionStart
-  b = input.selectionEnd
+  [a, b] = selected()
   show = a < b and not pointer? and document.activeElement is input
   formatMenu.hidden = not show
   return unless show
 
-  sel = (decodeStyle c for c in styles.slice a, b)
+  sel = (decodeStyle c for c in doc.styles.slice a, b)
   for btn in formatMenu.querySelectorAll "[data-weight]"
     btn.classList.toggle "active", sel.every (style)-> style.weight is btn.dataset.weight
   for btn in formatMenu.querySelectorAll "[data-toggle]"
     btn.classList.toggle "active", sel.every (style)-> style[btn.dataset.toggle]
+  formatMenu.querySelector("[data-caps]").classList.toggle "active", isCaps doc.text.slice a, b
 
   first = caretPoint a
   menuH = formatMenu.offsetHeight
@@ -642,10 +960,17 @@ for btn in formatMenu.querySelectorAll "button"
   btn.addEventListener "pointerdown", (e)-> e.preventDefault() # Keep the selection while choosing
   do (btn)-> btn.onclick = ()->
     if btn.dataset.weight?
-      setWeight btn.dataset.weight
+      restyleWith weight: btn.dataset.weight
+    else if btn.dataset.caps?
+      toggleCaps()
     else
-      # Red, all caps, and underline turn on for the whole selection, or off if it's all on already
-      restyleWith "#{btn.dataset.toggle}": not btn.classList.contains "active"
+      # Red, underline, strike, and X-out turn on for the whole selection, or off if it's all on already.
+      # A line can be struck through or X'd out, but not both.
+      on_ = not btn.classList.contains "active"
+      changes = "#{btn.dataset.toggle}": on_
+      changes.strike = false if btn.dataset.toggle is "xout" and on_
+      changes.xout = false if btn.dataset.toggle is "strike" and on_
+      restyleWith changes
 
 # SETTINGS ########################################################################################
 
@@ -685,20 +1010,17 @@ normalize = ()->
 # Like the Olympia SM9's line space lever: single, one and a half, or double
 spacings = [1, 1.5, 2]
 
-controls = {}
-controls[id] = $ "#" + id for id in ["red"]
-atlasBtns = {}
-atlasBtns[id] = $ "#" + id for id in weights
 chooser = $ ".chooser"
 
 # Flush left or centred, for the paragraph the caret is in
 alignments = ["left", "center"]
 alignLever = makeLever "align", alignments, ((a)-> linesIcon 4, a), ((a)-> setCenter a is "center")
 alignLever.title = "Flush left or centred"
-$("#red").after alignLever
+alignLever.classList.add "spacer"
+$(".buttons").prepend alignLever
 
 syncAlign = ()->
-  center = centeredAt input.value, styles, focusIndex()
+  center = centeredAt doc.text, doc.styles, focusIndex()
   setLever alignLever, alignments, if center then "center" else "left"
 
 paperName = ()->
@@ -708,29 +1030,18 @@ paperName = ()->
     papers[settings.paper].short + (if settings.landscape then " landscape" else "")
 
 syncControls = ()->
-  controls.red.checked = settings.red
-  btn.classList.toggle "active", name is settings.atlas for name, btn of atlasBtns
   renderChooser() unless chooser.hidden
   null
 
-# The strike & ribbon keys set how new letters are typed — and restyle the selection, if there is one
-for name, btn of atlasBtns
-  do (name)-> btn.onclick = ()->
-    setWeight name
-    changeSettings atlas: name
-controls.red.onchange = ()->
-  setRed controls.red.checked
-  changeSettings red: controls.red.checked
-
 # Hand the keyboard back to the page after pressing a key on the machine
-for elm in document.querySelectorAll ".buttons button, .toggle"
+for elm in document.querySelectorAll ".buttons button"
   elm.addEventListener "click", ()-> input.focus preventScroll: true
 
 $("#reset").onclick = ()->
   return unless confirm "Clear the page and reset the machine?"
-  input.value = lastText = styles = ""
+  input.value = ""
+  reparse()
   saveText()
-  saveStyles()
   settings = structuredClone defaults
   changeSettings {}
   input.focus()
@@ -811,6 +1122,34 @@ document.addEventListener "keydown", (e)-> closeChooser() if e.key is "Escape" a
 drag = null
 
 showGuides = (show)-> document.body.classList.toggle "guides", show
+
+# The tabs & levers only show on the sheet you're reaching for: point at the strip above it or the margin to its left.
+# On a touch screen, tap there and they stay up for a few seconds.
+toolsPage = null
+toolsTimer = null
+peripheral = ".edge, .strip, .page > .flag, .page > .lever.spacing"
+
+showTools = (page)->
+  return if page is toolsPage
+  toolsPage?.classList.remove "tools"
+  toolsPage = page
+  page?.classList.add "tools"
+
+pagesElm.addEventListener "pointermove", (e)->
+  return if e.pointerType is "touch" or drag? or pointer?
+  showTools e.target.closest(peripheral)?.closest(".page") ? null
+pagesElm.addEventListener "pointerleave", (e)-> showTools null unless e.pointerType is "touch" or drag?
+
+pagesElm.addEventListener "pointerdown", (e)->
+  return unless e.pointerType is "touch"
+  page = e.target.closest(peripheral)?.closest ".page"
+  clearTimeout toolsTimer
+  if page?
+    showTools page
+    toolsTimer = setTimeout (()-> showTools null unless drag?), 4000
+  else
+    showTools null
+, true
 
 pagesElm.addEventListener "pointerover", (e)-> showGuides true if e.target.closest ".strip, .vstop"
 pagesElm.addEventListener "pointerout", (e)-> showGuides drag? if e.target.closest ".strip, .vstop"
@@ -915,21 +1254,31 @@ pagesElm.addEventListener "pointerdown", (e)->
 goalCol = null # Remember the column while moving up & down, like a real text editor
 
 # follow: slide the carriage to the new strike point (for the keyboard, but not for pointing at the page)
+# Selections are given in printed characters, and mapped onto the Markdown underneath.
+# follow: slide the carriage to the new strike point (for the keyboard, but not for pointing at the page)
 setSelection = (anchor, focus, follow = true)->
   anchor = clamp anchor, 0, layout.n
   focus = clamp focus, 0, layout.n
   if focus < anchor
-    input.setSelectionRange focus, anchor, "backward"
+    input.setSelectionRange rawAt(focus), rawAt(anchor), "backward"
   else
-    input.setSelectionRange anchor, focus, "forward"
+    input.setSelectionRange rawAt(anchor), rawAt(focus), "forward"
   renderSelection()
   followCaret() if follow
 
 getAnchorFocus = ()->
-  if input.selectionDirection is "backward"
-    [input.selectionEnd, input.selectionStart]
+  [a, b] = selected()
+  if input.selectionDirection is "backward" then [b, a] else [a, b]
+
+# Left & right step over the printed characters, skipping the Markdown markers
+moveHorizontally = (dir, extend)->
+  [anchor, focus] = getAnchorFocus()
+  if anchor isnt focus and not extend
+    k = if dir < 0 then Math.min(anchor, focus) else Math.max(anchor, focus)
+    setSelection k, k
   else
-    [input.selectionStart, input.selectionEnd]
+    k = clamp focus + dir, 0, doc.text.length
+    setSelection (if extend then anchor else k), k
 
 insertText = (str)->
   # execCommand keeps the browser's undo history intact
@@ -966,7 +1315,10 @@ input.addEventListener "keydown", (e)->
     insertText "\t" unless e.shiftKey
   else if e.key is "Enter" and (e.metaKey or e.ctrlKey)
     e.preventDefault()
-    insertText "\f" # Feed in a fresh sheet
+    typeText "\f" # Feed in a fresh sheet
+  else if e.key in ["ArrowLeft", "ArrowRight"] and not (e.altKey or e.ctrlKey or e.metaKey)
+    e.preventDefault()
+    moveHorizontally (if e.key is "ArrowLeft" then -1 else 1), e.shiftKey
   else if e.key is "ArrowUp" and not mod and not e.altKey
     e.preventDefault()
     moveVertically -1, e.shiftKey
@@ -992,10 +1344,10 @@ input.addEventListener "keydown", (e)->
       followCaret()
 
 input.addEventListener "input", ()->
-  syncStyles()
+  reparse()
   saveText()
   render()
-  followCaret()
+  followCaret() unless applying # A rewrite puts the selection back itself, and decides whether to follow it
 
 for type in ["select", "selectionchange", "keyup"]
   input.addEventListener type, ()-> renderSelection()
@@ -1130,6 +1482,13 @@ $("#download").onclick = ()->
     setTimeout ((url)-> ()-> URL.revokeObjectURL url)(link.href), 1000
   null
 
+$("#markdown").onclick = ()->
+  link = document.createElement "a"
+  link.href = URL.createObjectURL new Blob [input.value], type: "text/markdown"
+  link.download = "senatorial.md"
+  link.click()
+  setTimeout ((url)-> ()-> URL.revokeObjectURL url)(link.href), 1000
+
 $("#print").onclick = ()->
   printElm = $ ".print"
   printElm.innerHTML = ""
@@ -1150,16 +1509,26 @@ $("#print").onclick = ()->
 settings = Object.assign structuredClone(defaults), load "settings", {}
 normalize()
 
-input.value = lastText = (try localStorage.getItem "text") ? ""
+input.value = (try localStorage.getItem "text") ? ""
 
-# Text from before styles were kept per character is all in the machine's current style
-styles = (try localStorage.getItem "styles") ? ""
-# Before caps & underline, styles were base-36 digits; only the last two (centred, red or not) need moving
-unless (try localStorage.getItem "stylesVersion") is "2"
-  styles = styles.replace(/a/g, ":").replace(/b/g, ";")
-  saveStyles()
-  try localStorage.setItem "stylesVersion", "2"
-styles = typingStyle().repeat input.value.length unless styles.length is input.value.length and /^[0-_]*$/.test styles
+# Older versions kept plain text with a separate styles string. Write those out as Markdown, once.
+unless (try localStorage.getItem "format") is "markdown"
+  oldStyles = (try localStorage.getItem "styles") ? ""
+  version = (try localStorage.getItem "stylesVersion") ? "1"
+  text = input.value
+  oldStyles = "" unless oldStyles.length is text.length
+  chars = Array.from text
+  codes = for c, i in text
+    # v1: weight×2 + red + 6·centred, in base 36. v2: the same, plus 12·caps + 24·underline, as a char code from "0".
+    v = if not oldStyles[i]? then 0 else if version is "2" then oldStyles.charCodeAt(i) - 48 else parseInt oldStyles[i], 36
+    chars[i] = c.toUpperCase() if v % 24 >= 12 and c.toUpperCase().length is 1
+    encodeStyle weight: weights[(v % 6) >> 1], red: (v & 1) is 1, center: v % 12 >= 6, underline: v >= 24
+  input.value = serializeBlock chars.join(""), codes.join("") + encodeStyle {}
+  saveText()
+  try localStorage.setItem "format", "markdown"
+  try localStorage.removeItem key for key in ["styles", "stylesVersion"]
+
+reparse()
 
 syncControls()
 loadAtlases()
