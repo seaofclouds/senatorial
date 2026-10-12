@@ -135,8 +135,8 @@
 
   body:not(.viewing) section { padding-bottom: calc(var(--deck-height, 4em) + 3.5em); }
 
-  /* Save is the machine's last key */
-  .edit-key { background: var(--key-active); }
+  /* Save is the machine's last key, and keeps the same size when it reads Edit */
+  .edit-key { min-width: 4.25em; background: var(--key-active); }
 
   /* READING — a page's link shows just the page, in the middle of the screen (or from the top, when it's taller).
      The machine is put away, all but its last key, which reads Edit, right where Save was. */
