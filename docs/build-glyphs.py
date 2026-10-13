@@ -348,15 +348,26 @@ def build():
             print(f"  {sec['title'].lower()} drawings set at {s:.2f} of the size they were drawn")
     pen = [d[0] for d in drawings["red", 2].values()]
     penRed, penDepth = inkColours(pen), inkDepth(pen)
-    for i in [i for sheet, i in drawings if sheet == "red"]:
-        got = drawings["red", i]
-        deepen = penDepth / inkDepth([d[0] for d in got.values()])
-        for c in got: got[c] = inRed(got[c], penRed, deepen)
-    # A character left blank in one section borrows its drawing from another of the same colour
+    reds = [i for sheet, i in drawings if sheet == "red"]
+    def inkedRed(got, like):
+        """The drawings in got inked in the red pen's red, as deep as its ink, by how deep the ink in like is."""
+        deepen = penDepth / inkDepth([d[0] for d in like.values()])
+        return {c: inRed(d, penRed, deepen) for c, d in got.items()}
+    # The red sheet's regular section was drawn with the light pen, too thin beside the regular type, so red regular
+    # takes the black sheet's regular drawings instead, inked red
+    blackRegular = dict(drawings["black", 1])
+    for i in reds:
+        own = blackRegular if i == 1 else drawings["red", i]
+        drawings["red", i] = inkedRed(own, own)
+    # A character left blank in one section borrows its drawing from another of the same colour, and anything still
+    # blank in red, the black drawing of the same weight, inked red
     for (sheet, i), got in drawings.items():
         for (other, j), there in drawings.items():
             if other != sheet: continue
             for c, d in there.items(): got.setdefault(c, d)
+    for i in reds:
+        missing = {c: d for c, d in drawings["black", i].items() if c not in drawings["red", i]}
+        drawings["red", i].update(inkedRed(missing, drawings["black", i]))
     typed = "".join(dict.fromkeys("".join(atlasLayout)))
     accentCells = set(accentOf) | {c.lower() for c in accentOf}
     drawnChars = [c for c in drawings["black", 1] if c not in accentCells and c not in typed]

@@ -104,7 +104,9 @@ and run the build. It lines the scan up against the typed glyphs and cuts out ea
 scaled by the same amount, so all of them keep the weight of the pen they were drawn with: a little more than it takes
 to bring the drawn capitals and x-height letters to the typed ones' size, so the strokes come nearer the type's weight
 (`enlarge` in the build sets how much, for each weight). The red drawings were made with more than one red pen, so
-they're all inked in the one red, the most saturated pen's. Each is set at the height its kind of character sits at (on
+they're all inked in the one red, the most saturated pen's. The red sheet's regular section was drawn with the light
+pen, so red regular takes the black sheet's regular drawings instead, inked red, and anything left blank in red borrows
+the black drawing of the same weight the same way. Each is set at the height its kind of character sits at (on
 the baseline, raised, centred, or hanging below), centred across its cell. Then it lays each accent over every letter
 that takes it.
 
