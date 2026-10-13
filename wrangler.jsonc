@@ -16,5 +16,15 @@
       "database_id": "3f7827b6-b124-4288-a800-2db3d8334d6e",
       "migrations_dir": "migrations"
     }
-  ]
+  ],
+  // Previews of other branches (npx wrangler preview) save shared pages to the same database as production
+  "previews": {
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "senatorial-shares",
+        "database_id": "3f7827b6-b124-4288-a800-2db3d8334d6e"
+      }
+    ]
+  }
 }
