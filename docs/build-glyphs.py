@@ -5,9 +5,9 @@
 #   python3 docs/build-glyphs.py
 #
 # Each scanned sheet is lined up against the layout docs/character-sheet.py printed it from, by finding every typed
-# glyph on it. Then each drawn glyph is cut out of its blank, cleaned of the blue and green ticks, and set at the
-# height its kind of character sits at, centred in its cell. Accents are laid over the letters that take them.
-# Needs Pillow and NumPy.
+# glyph on it. Then each drawn glyph is cut out of its blank, cleaned of the blue and green ticks, scaled with the rest
+# of its weight to the typed glyphs' size, and set at the height its kind of character sits at, centred in its cell.
+# Accents are laid over the letters that take them. Needs Pillow and NumPy.
 
 import json, os, sys
 import numpy as np
@@ -203,6 +203,36 @@ def baseOf(c):
     b = {"Ø": "O", "ø": "o"}.get(c) or unicodedata.normalize("NFD", c)[0]
     return "ı" if b == "i" else b
 
+# OTHER CHARACTERS THAT PRINT ######################################################################
+
+# Characters the type doesn't have, struck with one that looks the same
+lookalikes = {}
+for chars, glyph in [
+    ("✔✅", "✓"), ("✘❌", "✗"), ("✕✖⨯", "×"), ("☆⭐✩✪✫✬✭✮✯✰", "★"),
+    ("⇒⟹➔➜➝➞➟➠➡⟶", "→"), ("⇐⟸⟵⬅", "←"), ("⇑⬆", "↑"), ("⇓⬇", "↓"), ("↩", "↶"), ("↪", "↷"), ("⟲", "↺"), ("⟳", "↻"),
+    ("−‐‑", "-"), ("‒", "–"), ("―", "—"), ("′", "'"), ("″", '"'), ("‵", "`"), ("‛❛", "‘"), ("❜", "’"), ("‟❝", "“"),
+    ("❞", "”"), ("∙⋅", "·"), ("●◦‣⁃", "•"), ("∕", "/"), ("∣ǀ", "|"), ("≦⩽", "≤"), ("≧⩾", "≥"), ("∼～", "~"), ("⁁", "‸"),
+    ("μ", "µ"), ("Ω", "Ω"), ("Δ", "∆"), ("Σ", "∑"), ("Π", "∏"),
+]:
+    for c in chars: lookalikes[c] = glyph
+
+# A letter with an accent the type doesn't have is struck as the letter, then the accent over it, the typist's way
+overstrikes = {"\u0300": "`", "\u0301": "´", "\u0302": "ˆ", "\u0303": "˜", "\u0304": "¯", "\u0306": "˘", "\u0307": "˙",
+               "\u0308": "¨", "\u030a": "˚", "\u030b": "˝", "\u030c": "ˇ", "\u0327": "¸", "\u0328": "˛"}
+hanging = "¸˛" # accents that hang from a letter rather than sit over it
+
+def prints(c, have):
+    """Whether the app can strike c, from the glyphs it has."""
+    if c in have or lookalikes.get(c) in have: return True
+    base, *marks = unicodedata.normalize("NFD", c)
+    if base == "i": base = "ı"
+    return bool(marks) and (base in have or lookalikes.get(base) in have) and all(overstrikes.get(m) in have for m in marks)
+
+def characterNames(have):
+    """The names Markdown (and HTML) spell characters by, &frac12; for ½, for every one that prints."""
+    from html.entities import html5
+    return {n[:-1]: c for n, c in sorted(html5.items()) if n.endswith(";") and len(c) == 1 and c != " " and prints(c, have)}
+
 # THE NEW GLYPH IMAGES ############################################################################
 
 # Every strike gets one image: the typed glyphs copied from the typewriter's scans, then the drawn ones. Built at
@@ -219,15 +249,32 @@ strikes = [ # (glyph image, sheet, section on it, typed scan)
     ("double-red", "red", 2, "regular-red"), # the typewriter's red was never scanned double struck
 ]
 
-def inkBox(rgb, threshold=90):
-    ys, xs = np.nonzero(255 - rgb.min(2).astype(np.float32) > threshold)
-    return None if len(ys) == 0 else (xs.min(), ys.min(), xs.max() + 1, ys.max() + 1)
+def inkBox(rgb, threshold=90, smallest=30):
+    """The box around the ink in rgb, leaving out specks of dust in the scans."""
+    found = [f for f in components(255 - rgb.min(2).astype(np.float32) > threshold) if len(f[0]) >= smallest]
+    if not found: return None
+    ys, xs = np.concatenate([f[0] for f in found]), np.concatenate([f[1] for f in found])
+    return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
 
 def stamp(canvas, rgb, x, y):
     """Lay rgb over canvas with its top left at (x, y), ink over ink, as a typist's strikes would."""
     h, w = rgb.shape[:2]
     region = canvas[y:y + h, x:x + w]
     region[...] = np.minimum(region, rgb[:region.shape[0], :region.shape[1]])
+
+# Each weight's drawings are scaled by the one factor that brings its drawn capitals to the height of the typed ones,
+# and its drawn x-height letters to theirs, so every glyph keeps the weight of the pen it was drawn with
+def drawnScale(got):
+    heights = [(line["base"] - line["cap"], "ÆŒÐÞ"), (line["base"] - line["x"], "æœ")]
+    ratios = [h / (got[c][1][3] - got[c][1][1]) for h, chars in heights for c in chars if c in got]
+    return float(np.median(ratios)) if ratios else 1
+
+def scaled(d, s):
+    """A drawing d = (clean, box) at s times its size."""
+    clean, (x0, y0, x1, y1) = d
+    img = Image.fromarray(clean)
+    small = np.asarray(img.resize((max(1, round(img.width * s)), max(1, round(img.height * s))), Image.LANCZOS))
+    return small, (round(x0 * s), round(y0 * s), round(x1 * s), round(y1 * s))
 
 def setDrawn(canvas, ox, oy, d, rule=None, at=None):
     """Set a drawn glyph d = (clean, box) in the cell whose glyph origin is (ox, oy), by rule or at a given point."""
@@ -258,6 +305,9 @@ def build():
                 if c["typed"]: continue
                 d = drawn(cutOut(scan, M, c), red=sheet == "red")
                 if d is not None: got[c["char"]] = (d[0], (d[1][0], d[1][1], d[1][2], d[1][3]))
+            s = drawnScale(got)
+            for c in got: got[c] = scaled(got[c], s)
+            print(f"  {sec['title'].lower()} drawings set at {s:.2f} of the size they were drawn")
     # A character left blank in one section borrows its drawing from another of the same colour
     for (sheet, i), got in drawings.items():
         for (other, j), there in drawings.items():
@@ -308,15 +358,34 @@ def build():
             ox, oy = origin(c)
             at = (centre, "top", line["base"] - 6) if kind == "cedilla" else (centre, "bottom", line["x"] - gap)
             setDrawn(canvas, ox, oy, accents[kind, "low"], at=at)
+        if name == "regular":
+            # How low each accent reaches, so the app can set it over a letter it doesn't have
+            accentBottom = {}
+            for a in overstrikes.values():
+                if a in order and a not in hanging:
+                    ox, oy = origin(a)
+                    box = inkBox(canvas[oy - originY:oy - originY + cellH, ox - originX:ox - originX + cellW])
+                    if box: accentBottom[a] = (box[3] - originY) * outDPI / atlasDPI
         img = Image.fromarray(canvas).resize((canvas.shape[1] * outDPI // atlasDPI, canvas.shape[0] * outDPI // atlasDPI), Image.LANCZOS)
         # Black ink is saved as greys; red as a palette of 256 colours, plenty for red ink on white paper
         img = img.quantize(256, dither=Image.Dither.NONE) if "red" in name else img.convert("L")
         img.save(here("glyphs", name + ".png"), optimize=True)
         print(f"glyphs/{name}.png: {img.width} × {img.height}")
     s = outDPI / atlasDPI
-    json.dump({"dpi": outDPI, "columns": columns, "cellWidth": cellW * s, "cellHeight": cellH * s,
-               "glyphX": originX * s, "glyphY": originY * s, "chars": "".join(order)},
-              open(here("glyphs", "layout.json"), "w"), ensure_ascii=False)
+    have = set(order)
+    names = characterNames(have)
+    json.dump({
+        "dpi": outDPI, "columns": columns, "cellWidth": cellW * s, "cellHeight": cellH * s,
+        "glyphX": originX * s, "glyphY": originY * s, "chars": "".join(order),
+        "lookalikes": {c: g for c, g in lookalikes.items() if g in have and c not in have},
+        "overstrikes": {m: a for m, a in overstrikes.items() if a in have},
+        "hanging": hanging,
+        # where the bottom of an accent goes, over a capital and over a lowercase letter, down from a glyph's top
+        "accentLine": {"cap": (line["cap"] - gap) * s, "low": (line["x"] - gap) * s},
+        "accentBottom": accentBottom,
+        "names": names,
+    }, open(here("glyphs", "layout.json"), "w"), ensure_ascii=False, indent=None, separators=(",", ":"))
+    print(f"{len(names)} character names")
     print(f"{len(order)} characters: {len(typed)} typed, {len(drawnChars)} drawn, {len(composed) + len(spacingAccents)} built from accents")
 
 if __name__ == "__main__":
