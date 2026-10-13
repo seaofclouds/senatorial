@@ -47,13 +47,14 @@ sheet = [
 ]
 chars = list(dict.fromkeys("".join(sheet)))
 
-# Each accent is drawn once over a capital and once over a lowercase letter, in a blank beside the typed letter, and
-# laid over any letter that takes it (accented i's over the dotless ı). The ticks in the blank sit where the accent
-# does: just above the capitals or the lowercase, or on the baseline for the ones that hang below or cross the letter.
+# Each accent is drawn once over a capital and once over a lowercase letter, in the blanks following a typed letter to
+# line them up against, and laid over any letter that takes it (accented i's over the dotless ı). The ticks in a blank
+# sit where the accent does: just above the capitals or the lowercase, or on the baseline for the ones that hang below
+# or cross the letter.
 capAccent, lowAccent = 143, 115 # pixels above the baseline in the scans, a little over the capitals and the x-height
-accents = [ # (typed letter, accented letter, how far above the baseline the accent sits)
-    *[("A", c, capAccent) for c in "ÀÁÂÄÃÅ"], ("C", "Ç", 0), ("O", "Ø", 0),
-    *[("a", c, lowAccent) for c in "àáâäãå"], ("c", "ç", 0), ("o", "ø", 0),
+accents = [ # (typed letter, the accented letters to draw beside it, how far above the baseline their accents sit)
+    ("A", "ÀÁÂÄÃÅ", capAccent), ("C", "Ç", 0), ("O", "Ø", 0),
+    ("a", "àáâäãå", lowAccent), ("c", "ç", 0), ("o", "ø", 0),
 ]
 
 def crop(img, c):
@@ -78,10 +79,10 @@ def section(title, atlas):
     img = Image.open(os.path.join(root, "glyphs", atlas + ".png"))
     typed = lambda c: f'<img src="{crop(img, c)}">' if atlasPos(c) else ""
     cells = [cell(c, typed(c)) for c in chars]
-    # The accents start a row of their own, so each pair stays together
+    # The accents start a row of their own, so each letter stays with its blanks
     cells += ['<div class="cell gap"></div>'] * (-len(cells) % columns)
     for letter, accented, lift in accents:
-        cells += [cell(letter, typed(letter)), cell(accented, lift=lift)]
+        cells += [cell(letter, typed(letter))] + [cell(c, lift=lift) for c in accented]
     return f'<section><h2>{title}</h2><div class="grid">{"".join(cells)}</div></section>'
 
 font = sys.argv[1] if len(sys.argv) > 1 else None
@@ -134,4 +135,4 @@ for file, title, weights in sheets:
     open(out + ".html", "w").write(page)
     subprocess.run(["node", "-e", printer, out + ".html", out + ".pdf"], check=True)
     os.remove(out + ".html")
-    print(f"{len(chars)} characters and {len(accents)} accents × {len(weights)} → {out}.pdf")
+    print(f"{len(chars)} characters and {sum(len(a) for _, a, _ in accents)} accents × {len(weights)} → {out}.pdf")
