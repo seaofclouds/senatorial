@@ -3,7 +3,7 @@
 # Everything is measured in real-world inches, so pages come out at their true physical size
 charactersPerInch = 11 # this is based on the actual typewriter
 linesPerInch = 6 # standard typewriter line feed — single spacing is 1/6"
-atlasDPI = 600 # the glyph images' resolution (glyphs/layout.json)
+atlasDPI = 1200 # the glyph images' resolution (glyphs/layout.json)
 exportDPI = 600 # Resolution of saved & printed pages. Change it to whatever you want, and everything Just Works™
 
 # PAPER ###########################################################################################
@@ -1845,7 +1845,7 @@ closeCharacters = ()->
 renderCharacters = ()->
   keys = characters.querySelector ".keys"
   keys.innerHTML = ""
-  scale = 0.42 # CSS px per atlas pixel
+  scale = 0.21 # CSS px per atlas pixel
   names = {}
   names[c] ?= name for name, c of atlas.names
   for c in Array.from(atlas.chars) when c.codePointAt(0) > 127

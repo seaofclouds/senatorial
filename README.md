@@ -87,7 +87,7 @@ Only the browser a page was made in can change it: it keeps the page's key, and 
 ## Glyphs
 
 Every strike (light, regular and double struck, in black and in red) has one image in `glyphs/`, with the glyphs set
-out in a grid in the order `glyphs/layout.json` lists them, at 600 dpi. A character the images don't have types as a
+out in a grid in the order `glyphs/layout.json` lists them, at 1200 dpi. A character the images don't have types as a
 blank space.
 
 They're built by `python3 docs/build-glyphs.py`, from two sources in `scans/`:

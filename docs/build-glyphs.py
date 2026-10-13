@@ -241,9 +241,9 @@ def characterNames(have):
 
 # THE NEW GLYPH IMAGES ############################################################################
 
-# Every strike gets one image: the typed glyphs copied from the typewriter's scans, then the drawn ones. Built at
-# 1200 dpi and saved at 600, the resolution pages are printed and exported at.
-outDPI = 600
+# Every strike gets one image: the typed glyphs copied from the typewriter's scans, then the drawn ones. Built and
+# saved at 1200 dpi, the scans' own resolution: any less blurs away the dots of the ribbon's weave in every glyph.
+outDPI = 1200
 columns = 24
 cellW, cellH = 200, 360          # at 1200 dpi, a glyph's cell plus room around it for accents and descenders
 padX, padY = gw * 0.4, gh * 2 / 3 # how much around its cell the app takes with each glyph
@@ -430,6 +430,12 @@ def build():
         # Saved as a palette of 256 colours, plenty for one colour of ink on white paper, and keeping the tint of each
         # pen's black (the gel pen's is a little blue) and the ribbon's
         img = img.quantize(256, dither=Image.Dither.NONE)
+        # The paper stays pure white. Quantizing averages it with the palest specks of ink, and the app overlaps glyphs
+        # darkest over lightest, so off-white paper would show as a faint box behind every glyph.
+        palette = img.getpalette()
+        paper = max(img.getcolors())[1]
+        palette[3 * paper:3 * paper + 3] = [255, 255, 255]
+        img.putpalette(palette)
         img.save(here("glyphs", name + ".png"), optimize=True)
         print(f"glyphs/{name}.png: {img.width} × {img.height}")
     s = outDPI / atlasDPI
