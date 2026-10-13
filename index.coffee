@@ -102,21 +102,35 @@ verticalAlign = gh * .15
 padX = gw * 0.4
 padY = gh * 2 / 3
 
-# Typographer's punctuation that the typewriter doesn't have, mapped to the keys you'd actually strike (until the atlas has its own)
-substitutions = "‘": "'", "’": "'", "“": "\"", "”": "\"", "–": "-", "—": "-", "×": "x"
-
 # The x,y pixel position within the atlas of a character's glyph, or nulls if the atlas doesn't have it
 getGlyphPosInAtlas = (c)->
   i = atlas?.index.get c
   return [null, null] unless i?
   [(i % atlas.columns) * atlas.cellWidth + atlas.glyphX, Math.floor(i / atlas.columns) * atlas.cellHeight + atlas.glyphY]
 
+# How to strike a character: a list of [x, y, lift] for each glyph struck at its place, empty if it can't be.
+# A character the type doesn't have is struck with one that looks the same (✔ with ✓, ⇒ with →); a letter with an
+# accent it doesn't have, as the letter with the accent struck over it, the way a typist would.
 glyphCache = {}
 glyph = (c)->
   glyphCache[c] ?= do ()->
-    [gx, gy] = getGlyphPosInAtlas c
-    [gx, gy] = getGlyphPosInAtlas substitutions[c] if not gx? and substitutions[c]?
-    [gx, gy]
+    for k in [c, atlas?.lookalikes[c]] when k?
+      [gx, gy] = getGlyphPosInAtlas k
+      return [[gx, gy, 0]] if gx?
+    [letter, marks...] = Array.from c.normalize "NFD"
+    letter = "ı" if letter is "i"
+    [gx, gy] = getGlyphPosInAtlas atlas?.lookalikes[letter] ? letter
+    return [] unless gx? and marks.length
+    parts = [[gx, gy, 0]]
+    for mark in marks
+      accent = atlas.overstrikes[mark]
+      [ax, ay] = getGlyphPosInAtlas accent
+      return [] unless ax?
+      # An accent over a letter goes on the line for a capital or a lowercase one; one under it hangs as it is
+      lift = if accent in atlas.hanging then 0
+      else atlas.accentLine[if letter is letter.toLowerCase() then "low" else "cap"] - atlas.accentBottom[accent]
+      parts.push [ax, ay, lift]
+    parts
 
 # These images store the glyph atlases, one per strike & ribbon colour
 atlases = {}
@@ -130,7 +144,9 @@ loadAtlases = ()->
   fetch("glyphs/layout.json").then((r)-> r.json()).then (layout)->
     atlas = Object.assign layout, index: new Map Array.from(layout.chars).map (c, i)-> [c, i]
     glyphCache = {}
+    reparse() # characters written by name print once their names are known
     invalidate()
+    renderSelection()
     done()
   for name in atlasNames
     do (name)->
@@ -184,6 +200,7 @@ alignAt = (text, codes, i)-> styleAlign codes[paragraphStart text, i] ? encodeSt
 #   ~~struck through~~   ~~~X'd out~~~   and a whole line wrapped in -> and <- is centred, or in -> and -> flush right
 #   # A heading (any level) is double struck & underlined, the way a typist would set one off
 # A backslash makes the next marker character print as itself.
+#   &frac12; &rarr; &#189; &#xBD; — a character written by its name or number prints as the character
 
 delimiters = # marker character → length of the run → what it does
   "*": {1: "underline", 2: "double"}
@@ -191,12 +208,21 @@ delimiters = # marker character → length of the run → what it does
   "`": {1: "light"}
   "=": {2: "red"}
   "~": {2: "strike", 3: "xout"}
-escapable = "*_`=~\\-<#|"
+escapable = "*_`=~\\-<#|&"
 wordChar = /[\p{L}\p{N}]/u
 blankChar = /\s/
 
+# A character written by its name or number, the way Markdown (and HTML) spells them: the length of what's written at
+# i in s, and the character it stands for, if it's one the type can strike
+characterAt = (s, i)->
+  return null unless s[i] is "&" and m = s.slice(i, i + 40).match /^&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));/
+  code = if m[1] then +m[1] else if m[2] then parseInt m[2], 16
+  c = if code? then (if code <= 0xFFFF then String.fromCharCode code) else atlas?.names[m[3]]
+  if c and glyph(c).length then [m[0].length, c] else null
+
 # Read one line (without its line break). kinds says what each raw character is: "text" (printed), "open" or
-# "close" (an inline marker), "blockOpen" or "blockClose" (the centring arrows), or "escape" (a backslash).
+# "close" (an inline marker), "blockOpen" or "blockClose" (the centring arrows), "escape" (a backslash), or "entity"
+# then "entityTail" (a character written by its name or number, which prints as one).
 parseLine = (line)->
   n = line.length
   kinds = new Array(n).fill "text"
@@ -221,7 +247,7 @@ parseLine = (line)->
   spans = parseInline line, start, end, kinds
   styles = new Array n
   base = if heading then {weight: "double", underline: true, heading} else {weight: "regular"}
-  styles[x] = Object.assign {}, base, alignStyle align for x in [0...n] when kinds[x] is "text"
+  styles[x] = Object.assign {}, base, alignStyle align for x in [0...n] when kinds[x] in ["text", "entity"]
   applySpans styles, spans, kinds
   {kinds, styles, align, heading}
 
@@ -237,6 +263,10 @@ parseInline = (line, start, end, kinds)->
     else if c is "\\" and i + 1 < end and line[i + 1] in escapable
       kinds[i] = "escape"
       i += 2
+    else if (ent = characterAt line, i) and i + ent[0] <= end
+      kinds[i] = "entity"
+      kinds[y] = "entityTail" for y in [i + 1...i + ent[0]]
+      i += ent[0]
     else if delimiters[c]?
       j = i
       j++ while j < end and line[j] is c
@@ -275,7 +305,7 @@ parseInline = (line, start, end, kinds)->
 applySpans = (styles, spans, kinds)->
   spans.sort (a, b)-> (b.to - b.from) - (a.to - a.from)
   for span in spans
-    for x in [span.from...span.to] when kinds[x] in ["text", "br"]
+    for x in [span.from...span.to] when kinds[x] in ["text", "br", "entity"]
       if span.type in weights then styles[x].weight = span.type else styles[x][span.type] = true
   styles
 
@@ -348,7 +378,7 @@ parseRow = (line, aligns, header)->
       else
         x++
     spans = parseInline line, a, z, kinds
-    styles[x] = Object.assign {}, base for x in [a...z] when kinds[x] in ["text", "br"]
+    styles[x] = Object.assign {}, base for x in [a...z] when kinds[x] in ["text", "br", "entity"]
     applySpans styles, spans, kinds
     # The pipe after each cell (or the end of the row) carries that cell's column alignment
     if ce < last
@@ -419,6 +449,7 @@ parseMarkdown = (raw)->
         kinds.push kind
         printed = switch kind
           when "text" then line.text[x]
+          when "entity" then characterAt(line.text, x)[1]
           when "sep" then cellBreak
           when "br" then cellLineBreak
         if printed?
@@ -504,6 +535,7 @@ writeLine = (chars, styles, align, heading, opts)->
       if c is cellLineBreak then (if opts.cell then "<br>" else " ")
       else if c is cellBreak then " " # A cell boundary that's ended up outside a table is just a space
       else if c is "|" and opts.cell then "\\|"
+      else if c is "&" then (if characterAt chars.slice(i, i + 40).join(""), 0 then "\\&" else c) # an & that would read as a name prints as typed
       else if opts.escape and c in escapable then "\\" + c
       else c
   out += markerFor type, opts for type in stack.slice().reverse()
@@ -995,9 +1027,9 @@ drawPage = (ctx, p, ppi)->
   {start, end} = layout.pages[p]
   text = layout.text
   strike = (img, c, px, py)->
-    [gx, gy] = glyph c
-    return unless gx? # A key the machine doesn't have strikes nothing, leaving a blank space
-    ctx.drawImage img, gx - padX, gy - padY, gw + padX*2, gh + padY*2, px - padX, py - padY, gw + padX*2, gh + padY*2
+    # A key the machine doesn't have strikes nothing, leaving a blank space
+    for [gx, gy, lift] in glyph c
+      ctx.drawImage img, gx - padX, gy - padY, gw + padX*2, gh + padY*2, px - padX, py - padY + lift, gw + padX*2, gh + padY*2
 
   # Where a line wraps in the middle of an underlined (or struck through, or X'd out) phrase, the typist stops at the
   # last letter on the line and starts again at the first one on the next: the spaces around the wrap go bare
@@ -1604,7 +1636,7 @@ syncControls = ()->
   null
 
 # Hand the keyboard back to the page after pressing a key on the machine
-for elm in document.querySelectorAll ".buttons button:not(#paper):not(#import)"
+for elm in document.querySelectorAll ".buttons button:not(#paper):not(#characters):not(#import)"
   elm.addEventListener "click", ()-> input.focus preventScroll: true
 
 # PAPER CHOOSER ###################################################################################
@@ -1723,6 +1755,59 @@ for btn in chooser.querySelectorAll "[data-landscape]"
 
 chooser.onclick = (e)-> closeChooser() if e.target is chooser or e.target.matches ".sheets"
 document.addEventListener "keydown", (e)-> closeChooser() if e.key is "Escape" and not chooser.hidden
+
+# CHARACTER KEY ###################################################################################
+
+# Press the character key, and every character the machine strikes that isn't on the keyboard is laid out on the
+# desk, struck in its own type. Pick one to type it. Pointing at one shows the name it can also be written by.
+
+characters = $ ".characters"
+charactersKey = $ "#characters"
+charactersKey.onclick = ()-> openCharacters()
+
+openCharacters = ()->
+  return unless atlas?
+  renderCharacters() unless characters.querySelector ".keys button"
+  characters.hidden = false
+  document.body.classList.add "choosing"
+  characters.querySelector(".keys button")?.focus preventScroll: true
+
+closeCharacters = ()->
+  characters.hidden = true
+  document.body.classList.remove "choosing"
+  input.focus preventScroll: true
+  scrollCaretIntoView()
+
+renderCharacters = ()->
+  keys = characters.querySelector ".keys"
+  keys.innerHTML = ""
+  scale = 0.42 # CSS px per atlas pixel
+  names = {}
+  names[c] ?= name for name, c of atlas.names
+  for c in Array.from(atlas.chars) when c.codePointAt(0) > 127
+    do (c)->
+      [gx, gy] = getGlyphPosInAtlas c
+      key = document.createElement "button"
+      code = "U+" + c.codePointAt(0).toString(16).toUpperCase().padStart 4, "0"
+      key.title = [c, code, (if names[c] then "&#{names[c]};")].filter(Boolean).join "  "
+      key.setAttribute "aria-label", c
+      face = document.createElement "span"
+      face.className = "glyph"
+      Object.assign face.style,
+        width: (gw + padX * 2) * scale + "px"
+        height: (gh + padY * 2) * scale + "px"
+        backgroundImage: "url(glyphs/regular.png)"
+        backgroundSize: "#{atlas.columns * atlas.cellWidth * scale}px auto"
+        backgroundPosition: "#{-(gx - padX) * scale}px #{-(gy - padY) * scale}px"
+      key.append face
+      key.onclick = ()->
+        closeCharacters()
+        insertText c
+      keys.append key
+  null
+
+characters.onclick = (e)-> closeCharacters() if e.target is characters or e.target.matches ".keys"
+document.addEventListener "keydown", (e)-> closeCharacters() if e.key is "Escape" and not characters.hidden
 
 # STOPS ###########################################################################################
 

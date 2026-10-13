@@ -476,6 +476,42 @@
 
   body.choosing { overflow: hidden; }
 
+  /* Character key — every character the machine strikes, laid out on the desk */
+  .characters {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-flow: column;
+    align-items: center;
+    gap: 1.5em;
+    padding: 2.5em 1.5em;
+    overflow: auto;
+    background: hsl(40 20% 90%);
+
+    p { margin: 0; font-size: .85rem; color: hsl(30, 5%, 50%); text-align: center; }
+
+    .keys {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: .4em;
+      max-width: 60em;
+      margin: auto 0;
+    }
+
+    button {
+      padding: 0;
+      border-radius: .3em;
+      background: white;
+      box-shadow: 0 .5px 1px #0001;
+      transition: translate .15s, box-shadow .15s;
+      &:hover, &:focus-visible { translate: 0 -2px; box-shadow: 0 3px 8px #0002; }
+    }
+
+    .glyph { display: block; background-repeat: no-repeat; }
+  }
+
   .sheet {
     position: relative;
     flex: none;
@@ -589,6 +625,7 @@
   <div class="ui">
     <div class="buttons">
       <button id="paper" title="Paper">Letter</button>
+      <button id="characters" title="Every character the machine strikes, to type one">ñ ½ →</button>
       <span class="saved"></span>
       <button id="new" title="Feed in a fresh page, at a new link">New</button>
       <button id="import" title="Open a Markdown or text file in place of this page">Import Markdown</button>
@@ -607,6 +644,11 @@
     <button data-landscape="true">Landscape</button>
   </div>
   <div class="sheets"></div>
+</div>
+
+<div class="characters" hidden>
+  <p>Click a character to type it. Each can also be written by its name, as shown when you point at it.</p>
+  <div class="keys"></div>
 </div>
 
 <div class="print"></div>
