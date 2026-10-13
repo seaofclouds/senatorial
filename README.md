@@ -69,6 +69,13 @@ changes when they come back to it), and their Edit key makes them a copy of thei
 
 Only the browser a page was made in can change it: it keeps the page's key, and the server keeps just a hash of it.
 
+## Adding glyphs
+
+`docs/character-sheet.pdf` and `docs/character-sheet-red.pdf` lay out every character Senatorial is meant to have, at
+true size, in each strike: the typewriter's own glyphs, cut from the scans in `glyphs/`, and a blank (or the bare letter,
+for an accent) wherever one still needs drawing. Print one at actual size, draw in the gaps, and scan it back in.
+`python3 docs/character-sheet.py` rebuilds them. A character the scans don't have yet types as a blank space.
+
 ## Running it
 
 There's no build step — `index.coffee` is compiled in the browser by `coffeescript.js`.
