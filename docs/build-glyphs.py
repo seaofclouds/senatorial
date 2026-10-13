@@ -1,0 +1,453 @@
+#!/usr/bin/env python3
+# Builds the glyph images in glyphs/ from the typewriter's own scans (scans/typed/) and the filled-in character sheets
+# (scans/character-sheet-black.png and scans/character-sheet-red.png).
+#
+#   python3 docs/build-glyphs.py
+#
+# Each scanned sheet is lined up against the layout docs/character-sheet.py printed it from, by finding every typed
+# glyph on it. Then each drawn glyph is cut out of its blank, cleaned of the blue and green ticks, scaled with the rest
+# of its weight to the typed glyphs' size, and set at the height its kind of character sits at, centred in its cell.
+# Accents are laid over the letters that take them. Needs Pillow and NumPy.
+
+import json, os, sys
+import numpy as np
+from PIL import Image
+
+Image.MAX_IMAGE_PIXELS = None
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+here = lambda *p: os.path.join(root, *p)
+
+# The typewriter's own scans, one for each strike, and where each glyph sits in them
+atlasDPI = 1200
+charactersPerInch = 11
+atlasLayout = "!\"#$%_&'()*+ 1234567890-= QWERTYUIOP¼ qwertyuiop½ ASDFGHJKL:@ asdfghjkl;¢ ZXCVBNM,.? zxcvbnm,./".split()
+sx, sy = 75, 110
+gw, gh = atlasDPI / charactersPerInch, atlasDPI / 8
+pad = gw * 0.4
+skew = 1.3
+baseline = 128 # where the letters sit, down from the top of a glyph's cell
+
+def atlasPos(c):
+    for y, row in enumerate(atlasLayout):
+        x = row.find(c)
+        if x != -1:
+            return sx + 2 * x * gw, sy + 2 * y * gh - x * skew
+    return None
+
+typedScans = {}
+def typedScan(name):
+    if name not in typedScans: typedScans[name] = Image.open(here("scans", "typed", name + ".png")).convert("RGB")
+    return typedScans[name]
+
+def gray(img):
+    return np.asarray(img.convert("L"), dtype=np.float32)
+
+# LINING UP A SCAN ################################################################################
+
+def ncc(window, template):
+    """Normalised cross-correlation of template at every offset inside window."""
+    th, tw = template.shape
+    t = template - template.mean()
+    tn = np.sqrt((t * t).sum()) or 1
+    H, W = window.shape
+    fh, fw = H + th, W + tw
+    corr = np.fft.irfft2(np.fft.rfft2(window, (fh, fw)) * np.conj(np.fft.rfft2(t, (fh, fw))), (fh, fw))
+    corr = corr[:H - th + 1, :W - tw + 1]
+    # local sums of the window under the template, for its mean and spread
+    ii = np.pad(window.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    ii2 = np.pad((window * window).cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    box = lambda a: a[th:, tw:] - a[:-th, tw:] - a[th:, :-tw] + a[:-th, :-tw]
+    s, s2 = box(ii), box(ii2)
+    var = np.maximum(s2 - s * s / (th * tw), 1e-6)
+    return corr / (np.sqrt(var) * tn)
+
+def register(scan, sections, scale=4, radius=0.12):
+    """Fit the affine map from sheet inches to scan pixels, by finding each typed glyph near where it was printed."""
+    small = scan.resize((scan.width // scale, scan.height // scale), Image.LANCZOS)
+    s = gray(small)
+    dpi = atlasDPI / scale
+    r = int(radius * dpi)
+    src, dst, scores = [], [], []
+    for sec in sections:
+        atlas = typedScan(sec["atlas"])
+        for c in sec["cells"]:
+            if not c["typed"]: continue
+            gx, gy = atlasPos(c["char"])
+            crop = atlas.crop((round(gx - pad), round(gy - pad), round(gx + gw + pad), round(gy + gh + pad)))
+            t = gray(crop.resize((crop.width // scale, crop.height // scale), Image.LANCZOS))
+            # where the crop's top left corner was printed, in inches
+            ex = c["x"] - pad / atlasDPI
+            ey = c["y"] + c["h"] - (baseline + pad) / atlasDPI
+            x0, y0 = round(ex * dpi) - r, round(ey * dpi) - r
+            win = s[y0:y0 + t.shape[0] + 2 * r, x0:x0 + t.shape[1] + 2 * r]
+            score = ncc(win, t)
+            iy, ix = np.unravel_index(np.argmax(score), score.shape)
+            src.append((ex * dpi, ey * dpi))
+            dst.append((x0 + ix, y0 + iy))
+            scores.append(score[iy, ix])
+    src, dst, scores = np.array(src), np.array(dst, dtype=float), np.array(scores)
+    keep = scores > 0.5
+    for _ in range(4):
+        M, *_ = np.linalg.lstsq(np.c_[src[keep], np.ones(keep.sum())], dst[keep], rcond=None)
+        resid = np.linalg.norm(np.c_[src, np.ones(len(src))] @ M - dst, axis=1)
+        keep = (scores > 0.5) & (resid < max(1.0, 3 * np.median(resid[keep])))
+    # inches → scan pixels at full resolution
+    M = M * scale
+    M[:2] *= dpi
+    return M, {"glyphs": len(src), "used": int(keep.sum()), "rms px": round(float(np.sqrt((resid[keep] ** 2).mean()) * scale), 2)}
+
+# CUTTING OUT A DRAWN GLYPH #######################################################################
+
+cellWidth = 0.24 # inches from one character's centre to the next on the sheets
+below = 0.07     # how far under the baseline a blank reaches before its label begins
+
+above = 0.26     # how far over the baseline a blank reaches, up to the label of the row above
+
+def cutOut(scan, M, c):
+    """The blank in cell c, straightened, at 1200 dpi, with the sheet's baseline at y = above * 1200."""
+    x0 = c["x"] + c["w"] / 2 - cellWidth / 2
+    y0 = c["y"] + c["h"] - above
+    w, h = round(cellWidth * atlasDPI), round((above + below) * atlasDPI)
+    a, d = M[0] / atlasDPI
+    b, e = M[1] / atlasDPI
+    cx, fy = np.array([x0, y0, 1]) @ M
+    return scan.transform((w, h), Image.AFFINE, (a, b, cx, d, e, fy), resample=Image.BICUBIC, fillcolor=(255, 255, 255))
+
+def components(mask):
+    """Label 8-connected regions of a boolean mask: returns a list of (ys, xs) index arrays."""
+    seen = np.zeros_like(mask, dtype=bool)
+    H, W = mask.shape
+    found = []
+    for y, x in zip(*np.nonzero(mask)):
+        if seen[y, x]: continue
+        stack, ys, xs = [(y, x)], [], []
+        seen[y, x] = True
+        while stack:
+            cy, cx = stack.pop()
+            ys.append(cy); xs.append(cx)
+            for ny in (cy - 1, cy, cy + 1):
+                for nx in (cx - 1, cx, cx + 1):
+                    if 0 <= ny < H and 0 <= nx < W and mask[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+        found.append((np.array(ys), np.array(xs)))
+    return found
+
+def ticks(rgb):
+    """Where the ticks printed either side of a blank are: pale blue or green, at its sides. Only the sides, since some
+    pens' black (the light gel pen's) scans a little blue, and the middle of a blank is all pen."""
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    sides = np.zeros(rgb.shape[1], bool)
+    sides[:round(rgb.shape[1] * 0.2)] = sides[-round(rgb.shape[1] * 0.2):] = True
+    return ((g - r > 18) | (b - r > 18)) & (r > 110) & sides
+
+def ink(img):
+    """How much ink is at each pixel (0 for paper), ignoring the blue and green ticks printed on the sheet."""
+    rgb = np.asarray(img, dtype=np.float32)
+    amount = 255 - rgb.min(2)
+    amount[ticks(rgb)] = 0
+    return amount
+
+def drawn(img, red=False, threshold=70, smallest=40):
+    """The pen marks in a cut-out blank, cleaned onto white paper, and their bounding box; None if it was left empty."""
+    amount = ink(img)
+    rgb = np.asarray(img, dtype=np.float32)
+    redness = rgb[..., 0] - (rgb[..., 1] + rgb[..., 2]) / 2
+    mask = amount > threshold
+    H, W = mask.shape
+    keep = np.zeros_like(mask)
+    for ys, xs in components(mask):
+        # Drop specks of dust, pencil, and strokes that wandered in from a neighbouring cell or ran down off the row
+        # above. Pen is darker than pencil or dust, and on the red sheet it's red.
+        if len(ys) < smallest or abs(xs.mean() - W / 2) > W * 0.42 or ys.min() == 0: continue
+        dark = amount[ys, xs].mean()
+        if (redness[ys, xs].mean() < 50) if red else (dark < 120): continue
+        if len(ys) < 60 and dark < 140: continue
+        keep[ys, xs] = True
+    if not keep.any(): return None
+    # take in the soft edges around the strokes kept
+    grown = keep.copy()
+    for _ in range(3):
+        grown[1:] |= grown[:-1]; grown[:-1] |= grown[1:]; grown[:, 1:] |= grown[:, :-1]; grown[:, :-1] |= grown[:, 1:]
+    grown &= ~ticks(rgb)
+    clean = np.where(grown[..., None], rgb, 255).astype(np.uint8)
+    ys, xs = np.nonzero(keep)
+    return clean, (xs.min(), ys.min(), xs.max() + 1, ys.max() + 1)
+
+# WHERE EACH KIND OF CHARACTER SITS ###############################################################
+
+# Measured off the typed glyphs, in pixels at 1200 dpi down from the top of a glyph's cell in the typewriter's scans
+line = {"base": 126, "cap": -5, "x": 23, "axis": 74, "paren": 62, "tail": 160}
+centre = 58 # across: the typed glyphs sit a little right of their cells' middle
+gap = 12    # between a letter and the accent over it
+
+# How each drawn character is set: the edge (or middle) of its ink that goes on which line. Anything not listed sits
+# on the baseline.
+placing = {}
+for chars, rule in [
+    ("¹²³ª º°™‘’“”`^˝ˇ¯˘˙", ("top", "cap")),       # raised
+    ("þƒ", ("top", "cap")),                        # tall, and hanging below the baseline
+    ("µ¡¿", ("top", "x")),                         # x-height, and hanging below
+    ("‚„", ("bottom", "tail")),                    # low quotes, hanging as low as a comma's tail
+    ("˛", ("top", "base")),                        # under the baseline
+    ("×÷±≠≈–—~·•¬<>«»‹›∞←→≤≥¤", ("middle", "axis")),
+    ("[]{}|\\¦∫⁄", ("middle", "paren")),
+]:
+    for c in chars.replace(" ", ""): placing[c] = rule
+
+# The accented letters, built from an accent drawn once for capitals and once for lowercase. Accented i's take theirs
+# over the dotless ı.
+accentOf = {"À": "grave", "Á": "acute", "Â": "circumflex", "Ä": "diaeresis", "Ã": "tilde", "Å": "ring", "Ç": "cedilla",
+            "Ø": "slash"}
+accented = {
+    "grave": "ÀÈÌÒÙàèìòù", "acute": "ÁÉÍÓÚÝáéíóúý", "circumflex": "ÂÊÎÔÛâêîôû", "diaeresis": "ÄËÏÖÜŸäëïöüÿ",
+    "tilde": "ÃÑÕãñõ", "ring": "Åå", "cedilla": "Çç", "slash": "Øø",
+}
+spacingAccents = {"´": "acute", "¨": "diaeresis", "ˆ": "circumflex", "˜": "tilde", "¸": "cedilla", "˚": "ring"}
+import unicodedata
+def baseOf(c):
+    b = {"Ø": "O", "ø": "o"}.get(c) or unicodedata.normalize("NFD", c)[0]
+    return "ı" if b == "i" else b
+
+# OTHER CHARACTERS THAT PRINT ######################################################################
+
+# Characters the type doesn't have, struck with one that looks the same
+lookalikes = {}
+for chars, glyph in [
+    ("✔✅", "✓"), ("✘❌", "✗"), ("✕✖⨯", "×"), ("☆⭐✩✪✫✬✭✮✯✰", "★"),
+    ("⇒⟹➔➜➝➞➟➠➡⟶", "→"), ("⇐⟸⟵⬅", "←"), ("⇑⬆", "↑"), ("⇓⬇", "↓"), ("↩", "↶"), ("↪", "↷"), ("⟲", "↺"), ("⟳", "↻"),
+    ("−‐‑", "-"), ("‒", "–"), ("―", "—"), ("′", "'"), ("″", '"'), ("‵", "`"), ("‛❛", "‘"), ("❜", "’"), ("‟❝", "“"),
+    ("❞", "”"), ("∙⋅", "·"), ("●◦‣⁃", "•"), ("∕", "/"), ("∣ǀ", "|"), ("≦⩽", "≤"), ("≧⩾", "≥"), ("∼～", "~"), ("⁁", "‸"),
+    ("μ", "µ"), ("Ω", "Ω"), ("Δ", "∆"), ("Σ", "∑"), ("Π", "∏"),
+]:
+    for c in chars: lookalikes[c] = glyph
+
+# A letter with an accent the type doesn't have is struck as the letter, then the accent over it, the typist's way
+overstrikes = {"\u0300": "`", "\u0301": "´", "\u0302": "ˆ", "\u0303": "˜", "\u0304": "¯", "\u0306": "˘", "\u0307": "˙",
+               "\u0308": "¨", "\u030a": "˚", "\u030b": "˝", "\u030c": "ˇ", "\u0327": "¸", "\u0328": "˛"}
+hanging = "¸˛" # accents that hang from a letter rather than sit over it
+
+def prints(c, have):
+    """Whether the app can strike c, from the glyphs it has."""
+    if c in have or lookalikes.get(c) in have: return True
+    base, *marks = unicodedata.normalize("NFD", c)
+    if base == "i": base = "ı"
+    return bool(marks) and (base in have or lookalikes.get(base) in have) and all(overstrikes.get(m) in have for m in marks)
+
+def characterNames(have):
+    """The names Markdown (and HTML) spell characters by, &frac12; for ½, for every one that prints."""
+    from html.entities import html5
+    return {n[:-1]: c for n, c in sorted(html5.items()) if n.endswith(";") and len(c) == 1 and c != " " and prints(c, have)}
+
+# THE NEW GLYPH IMAGES ############################################################################
+
+# Every strike gets one image: the typed glyphs copied from the typewriter's scans, then the drawn ones. Built at
+# 1200 dpi and saved at 600, the resolution pages are printed and exported at.
+outDPI = 600
+columns = 24
+cellW, cellH = 200, 360          # at 1200 dpi, a glyph's cell plus room around it for accents and descenders
+padX, padY = gw * 0.4, gh * 2 / 3 # how much around its cell the app takes with each glyph
+originX, originY = round((cellW - gw) / 2), round((cellH - gh) / 2)
+
+strikes = [ # (glyph image, sheet, section on it, typed scan)
+    ("light", "black", 0, "light"), ("regular", "black", 1, "regular"), ("double", "black", 2, "double"),
+    ("light-red", "red", 0, "light-red"), ("regular-red", "red", 1, "regular-red"),
+    ("double-red", "red", 2, "regular-red"), # the typewriter's red was never scanned double struck
+]
+
+def inkBox(rgb, threshold=90, smallest=30):
+    """The box around the ink in rgb, leaving out specks of dust in the scans."""
+    found = [f for f in components(255 - rgb.min(2).astype(np.float32) > threshold) if len(f[0]) >= smallest]
+    if not found: return None
+    ys, xs = np.concatenate([f[0] for f in found]), np.concatenate([f[1] for f in found])
+    return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+
+# The red drawings were made with more than one red pen, so they're all inked in the one red, the most saturated pen's
+# (the double struck section's): each pixel takes that pen's colour at the same depth of ink, and the ink is made as
+# deep as that pen's. How deep red ink is goes by how much green it takes out of the paper (it takes out the most
+# green, and keeps the red).
+def inkDepth(images):
+    """How deep the red ink in images is, by the middle of its pixels."""
+    depth = np.concatenate([255 - im[..., 1].ravel().astype(int) for im in images])
+    return float(np.median(depth[depth > 60]))
+
+def inkColours(images):
+    """A table from depth of red ink (0 to 255) to its colour at that depth in images."""
+    px = np.concatenate([im.reshape(-1, 3) for im in images]).astype(np.float64)
+    depth = 255 - px[:, 1].astype(int)
+    count = np.bincount(depth, minlength=256)
+    table = np.stack([np.bincount(depth, px[:, k], 256) for k in range(3)], 1) / np.maximum(count, 1)[:, None]
+    table[0], have = 255, count >= 20
+    have[0] = True
+    levels = np.arange(256)
+    return np.stack([np.interp(levels, levels[have], table[have, k]) for k in range(3)], 1)
+
+def inRed(d, table, deepen):
+    """A red drawing d = (clean, box) inked in the colours of table, its ink made deepen times as deep."""
+    clean, box = d
+    depth = np.clip(np.rint((255 - clean[..., 1].astype(np.float32)) * deepen), 0, 255).astype(int)
+    return table[depth].round().astype(np.uint8), box
+
+def stamp(canvas, rgb, x, y):
+    """Lay rgb over canvas with its top left at (x, y), ink over ink, as a typist's strikes would."""
+    h, w = rgb.shape[:2]
+    region = canvas[y:y + h, x:x + w]
+    region[...] = np.minimum(region, rgb[:region.shape[0], :region.shape[1]])
+
+# Each weight's drawings are scaled together, by one factor, so every glyph keeps the weight of the pen it was drawn
+# with. It's the factor that brings the drawn capitals to the height of the typed ones, and the drawn x-height letters
+# to theirs, then a little more, so the pen's strokes come nearer the weight of the type (any smaller, and they read
+# lighter than the letters around them), double struck most of all. A few of the widest overlap their neighbours.
+enlarge = {"Light": 1.15, "Regular": 1.15, "Double struck": 1.3}
+room = (186, 220) # the most a drawing may take at 1200 dpi before the app would cut it off at the edges of its cell
+
+def drawnScale(got, title):
+    heights = [(line["base"] - line["cap"], "ÆŒÐÞ"), (line["base"] - line["x"], "æœ")]
+    ratios = [h / (got[c][1][3] - got[c][1][1]) for h, chars in heights for c in chars if c in got]
+    return (float(np.median(ratios)) if ratios else 1) * enlarge[title]
+
+def scaled(d, s):
+    """A drawing d = (clean, box) at s times its size."""
+    clean, (x0, y0, x1, y1) = d
+    img = Image.fromarray(clean)
+    small = np.asarray(img.resize((max(1, round(img.width * s)), max(1, round(img.height * s))), Image.LANCZOS))
+    return small, (round(x0 * s), round(y0 * s), round(x1 * s), round(y1 * s))
+
+def setDrawn(canvas, ox, oy, d, rule=None, at=None):
+    """Set a drawn glyph d = (clean, box) in the cell whose glyph origin is (ox, oy), by rule or at a given point."""
+    clean, (x0, y0, x1, y1) = d
+    m = 4
+    piece = clean[max(y0 - m, 0):y1 + m, max(x0 - m, 0):x1 + m]
+    w, h = x1 - x0, y1 - y0
+    if at is not None: # (centre x, edge, value) for accents
+        cx, edge, v = at
+    else:
+        edge, which = rule or ("bottom", "base")
+        cx, v = centre, line[which]
+    left = cx - w / 2
+    top = {"top": v, "bottom": v - h, "middle": v - h / 2}[edge]
+    stamp(canvas, piece, round(ox + left) - (x0 - max(x0 - m, 0)), round(oy + top) - (y0 - max(y0 - m, 0)))
+
+def build():
+    # Every drawing on both sheets, by sheet and section
+    drawings = {}
+    for sheet, scanFile in [("black", "character-sheet-black"), ("red", "character-sheet-red")]:
+        layout = json.load(open(here("docs", "character-sheet" + ("-red" if sheet == "red" else "") + "-layout.json")))
+        scan = Image.open(here("scans", scanFile + ".png")).convert("RGB")
+        M, fit = register(scan, layout)
+        print(f"{sheet} sheet lined up from {fit['used']} of {fit['glyphs']} typed glyphs, to within {fit['rms px']} px")
+        for i, sec in enumerate(layout):
+            got = drawings[sheet, i] = {}
+            for c in sec["cells"]:
+                if c["typed"]: continue
+                d = drawn(cutOut(scan, M, c), red=sheet == "red")
+                if d is not None: got[c["char"]] = (d[0], (d[1][0], d[1][1], d[1][2], d[1][3]))
+            s = drawnScale(got, sec["title"])
+            for c, (_, (x0, y0, x1, y1)) in got.items():
+                got[c] = scaled(got[c], min(s, room[0] / (x1 - x0), room[1] / (y1 - y0)))
+            print(f"  {sec['title'].lower()} drawings set at {s:.2f} of the size they were drawn")
+    pen = [d[0] for d in drawings["red", 2].values()]
+    penRed, penDepth = inkColours(pen), inkDepth(pen)
+    reds = [i for sheet, i in drawings if sheet == "red"]
+    def inkedRed(got, like):
+        """The drawings in got inked in the red pen's red, as deep as its ink, by how deep the ink in like is."""
+        deepen = penDepth / inkDepth([d[0] for d in like.values()])
+        return {c: inRed(d, penRed, deepen) for c, d in got.items()}
+    # The red sheet's regular section was drawn with the light pen, too thin beside the regular type, so red regular
+    # takes the black sheet's regular drawings instead, inked red
+    blackRegular = dict(drawings["black", 1])
+    for i in reds:
+        own = blackRegular if i == 1 else drawings["red", i]
+        drawings["red", i] = inkedRed(own, own)
+    # A character left blank in one section borrows its drawing from another of the same colour, and anything still
+    # blank in red, the black drawing of the same weight, inked red
+    for (sheet, i), got in drawings.items():
+        for (other, j), there in drawings.items():
+            if other != sheet: continue
+            for c, d in there.items(): got.setdefault(c, d)
+    for i in reds:
+        missing = {c: d for c, d in drawings["black", i].items() if c not in drawings["red", i]}
+        drawings["red", i].update(inkedRed(missing, drawings["black", i]))
+    typed = "".join(dict.fromkeys("".join(atlasLayout)))
+    accentCells = set(accentOf) | {c.lower() for c in accentOf}
+    drawnChars = [c for c in drawings["black", 1] if c not in accentCells and c not in typed]
+    composed = [c for k in accented for c in accented[k]]
+    order = list(typed) + drawnChars + composed + list(spacingAccents)
+    rows = -(-len(order) // columns)
+
+    for name, sheet, i, typedName in strikes:
+        canvas = np.full((rows * cellH, columns * cellW, 3), 255, np.uint8)
+        got = drawings[sheet, i]
+        scanned = np.asarray(typedScan(typedName))
+        def origin(c):
+            n = order.index(c)
+            return (n % columns) * cellW + originX, (n // columns) * cellH + originY
+        def drawCell(c, ox, oy):
+            if c in typed:
+                gx, gy = atlasPos(c)
+                x, y = round(gx - pad), round(gy - pad)
+                stamp(canvas, scanned[y:y + round(gh + 2 * pad), x:x + round(gw + 2 * pad)], ox - round(pad), oy - round(pad))
+            elif c in got:
+                setDrawn(canvas, ox, oy, got[c], placing.get(c))
+        for c in typed + "".join(drawnChars):
+            drawCell(c, *origin(c))
+        # The accents, as drawn after a capital and after a lowercase letter
+        accents = {}
+        for c, kind in accentOf.items():
+            for case, ch in (("cap", c), ("low", c.lower())):
+                if ch in got: accents[kind, case] = got[ch]
+        for kind, letters in accented.items():
+            for c in letters:
+                ox, oy = origin(c)
+                drawCell(baseOf(c), ox, oy)
+                case = "cap" if c.isupper() else "low"
+                if (kind, case) not in accents: continue
+                x0, y0, x1, y1 = inkBox(canvas[oy - originY:oy - originY + cellH, ox - originX:ox - originX + cellW])
+                bx, by0, by1 = (x0 + x1) / 2 - originX, y0 - originY, y1 - originY
+                accent = accents[kind, case]
+                if kind == "slash":
+                    # struck through the letter, so reaching only a little past it
+                    h = accent[1][3] - accent[1][1]
+                    if h > 1.2 * (by1 - by0): accent = scaled(accent, 1.2 * (by1 - by0) / h)
+                    at = (bx, "middle", (by0 + by1) / 2)
+                elif kind == "cedilla": at = (bx, "top", line["base"] - 6)
+                else: at = (bx, "bottom", by0 - gap)
+                setDrawn(canvas, ox, oy, accent, at=at)
+        for c, kind in spacingAccents.items():
+            if (kind, "low") not in accents: continue
+            ox, oy = origin(c)
+            at = (centre, "top", line["base"] - 6) if kind == "cedilla" else (centre, "bottom", line["x"] - gap)
+            setDrawn(canvas, ox, oy, accents[kind, "low"], at=at)
+        if name == "regular":
+            # How low each accent reaches, so the app can set it over a letter it doesn't have
+            accentBottom = {}
+            for a in overstrikes.values():
+                if a in order and a not in hanging:
+                    ox, oy = origin(a)
+                    box = inkBox(canvas[oy - originY:oy - originY + cellH, ox - originX:ox - originX + cellW])
+                    if box: accentBottom[a] = (box[3] - originY) * outDPI / atlasDPI
+        img = Image.fromarray(canvas).resize((canvas.shape[1] * outDPI // atlasDPI, canvas.shape[0] * outDPI // atlasDPI), Image.LANCZOS)
+        # Saved as a palette of 256 colours, plenty for one colour of ink on white paper, and keeping the tint of each
+        # pen's black (the gel pen's is a little blue) and the ribbon's
+        img = img.quantize(256, dither=Image.Dither.NONE)
+        img.save(here("glyphs", name + ".png"), optimize=True)
+        print(f"glyphs/{name}.png: {img.width} × {img.height}")
+    s = outDPI / atlasDPI
+    have = set(order)
+    names = characterNames(have)
+    json.dump({
+        "dpi": outDPI, "columns": columns, "cellWidth": cellW * s, "cellHeight": cellH * s,
+        "glyphX": originX * s, "glyphY": originY * s, "chars": "".join(order),
+        "lookalikes": {c: g for c, g in lookalikes.items() if g in have and c not in have},
+        "overstrikes": {m: a for m, a in overstrikes.items() if a in have},
+        "hanging": hanging,
+        # where the bottom of an accent goes, over a capital and over a lowercase letter, down from a glyph's top
+        "accentLine": {"cap": (line["cap"] - gap) * s, "low": (line["x"] - gap) * s},
+        "accentBottom": accentBottom,
+        "names": names,
+    }, open(here("glyphs", "layout.json"), "w"), ensure_ascii=False, indent=None, separators=(",", ":"))
+    print(f"{len(names)} character names")
+    print(f"{len(order)} characters: {len(typed)} typed, {len(drawnChars)} drawn, {len(composed) + len(spacingAccents)} built from accents")
+
+if __name__ == "__main__":
+    build()

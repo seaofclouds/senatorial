@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # Builds docs/character-sheet.pdf: every character Senatorial should have, on one US Letter sheet, in light, regular
 # and double struck, and docs/character-sheet-red.pdf, the same in the red half of the ribbon. Characters the
-# typewriter already has are cut straight from the scans in glyphs/ at true size; anything else is left blank, to draw
-# in. Accents are drawn once each, for capitals and for lowercase, beside a typed letter to line them up against, and
+# typewriter already has are cut straight from its scans in scans/typed/ at true size; anything else is left blank, to
+# draw in. Accents are drawn once each, for capitals and for lowercase, beside a typed letter to line them up against, and
 # laid over typed letters later. Each character is labelled underneath in grey, and framed by a tick either side,
 # alternately non-photo blue and green, at its baseline (or, for an accent, where the accent sits).
 #
 #   python3 docs/character-sheet.py [path/to/Inconsolata.ttf]
 #
-# Needs Pillow, and Node with Playwright to print the PDF.
+# It also writes where every cell landed on each sheet (docs/character-sheet*-layout.json), which docs/build-glyphs.py
+# uses to read the filled-in sheets back. Needs Pillow, and Node with Playwright to print the PDF.
 
 import base64, html, io, os, subprocess, sys
 from PIL import Image
@@ -72,18 +73,19 @@ columns = 32
 
 def cell(label, glyph="", lift=0):
     small = " small" if label in smallLabels else ""
-    return (f'<div class="cell" style="--lift: {inch(lift)}"><div class="glyph">{glyph}</div>'
+    return (f'<div class="cell" style="--lift: {inch(lift)}" data-char="{html.escape(label)}" data-lift="{lift}"'
+            f'{" data-typed" if glyph else ""}><div class="glyph">{glyph}</div>'
             f'<div class="label{small}">{html.escape(label)}</div></div>')
 
 def section(title, atlas):
-    img = Image.open(os.path.join(root, "glyphs", atlas + ".png"))
+    img = Image.open(os.path.join(root, "scans", "typed", atlas + ".png"))
     typed = lambda c: f'<img src="{crop(img, c)}">' if atlasPos(c) else ""
     cells = [cell(c, typed(c)) for c in chars]
     # The accents start a row of their own, so each letter stays with its blanks
     cells += ['<div class="cell gap"></div>'] * (-len(cells) % columns)
     for letter, accented, lift in accents:
         cells += [cell(letter, typed(letter))] + [cell(c, lift=lift) for c in accented]
-    return f'<section><h2>{title}</h2><div class="grid">{"".join(cells)}</div></section>'
+    return f'<section data-atlas="{atlas}"><h2>{title}</h2><div class="grid">{"".join(cells)}</div></section>'
 
 font = sys.argv[1] if len(sys.argv) > 1 else None
 fontSrc = f"url('file://{os.path.abspath(font)}')" if font else \
@@ -120,6 +122,16 @@ const { chromium } = require(require('child_process').execSync('npm root -g').to
   const b = await chromium.launch(), p = await b.newPage();
   await p.goto('file://' + process.argv[1]); await p.evaluate(() => document.fonts.ready);
   await p.pdf({ path: process.argv[2], preferCSSPageSize: true, printBackground: true });
+  // Where every character's glyph box landed, in inches from the top left of the sheet, for reading scans back in
+  const layout = await p.evaluate(() => [...document.querySelectorAll('section')].map((s, i) => ({
+    title: s.querySelector('h2').textContent, atlas: s.dataset.atlas,
+    cells: [...s.querySelectorAll('.cell[data-char]')].map(c => {
+      const r = c.querySelector('.glyph').getBoundingClientRect();
+      return { char: c.dataset.char, typed: 'typed' in c.dataset, lift: +c.dataset.lift,
+               x: r.left / 96, y: r.top / 96, w: r.width / 96, h: r.height / 96 };
+    })
+  })));
+  require('fs').writeFileSync(process.argv[3], JSON.stringify(layout));
   await b.close();
 })();"""
 
@@ -135,6 +147,6 @@ for file, title, weights in sheets:
     page = f"""<!doctype html><meta charset="utf-8"><title>{title}</title><style>{style}</style>
 <main><h1>{title.upper()}</h1>{"".join(section(name, atlas) for name, atlas in weights)}</main>"""
     open(out + ".html", "w").write(page)
-    subprocess.run(["node", "-e", printer, out + ".html", out + ".pdf"], check=True)
+    subprocess.run(["node", "-e", printer, out + ".html", out + ".pdf", out + "-layout.json"], check=True)
     os.remove(out + ".html")
     print(f"{len(chars)} characters and {sum(len(a) for _, a, _ in accents)} accents × {len(weights)} → {out}.pdf")

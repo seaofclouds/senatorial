@@ -3,7 +3,7 @@
 # Everything is measured in real-world inches, so pages come out at their true physical size
 charactersPerInch = 11 # this is based on the actual typewriter
 linesPerInch = 6 # standard typewriter line feed — single spacing is 1/6"
-atlasDPI = 1200 # ROUGHLY — this is based on the glyph scan Todd sent me
+atlasDPI = 600 # the glyph images' resolution (glyphs/layout.json)
 exportDPI = 600 # Resolution of saved & printed pages. Change it to whatever you want, and everything Just Works™
 
 # PAPER ###########################################################################################
@@ -86,13 +86,9 @@ defaultTabs = (g)-> (c for c in [g.left + defaultTabInterval...g.right] by defau
 
 # ATLAS ###########################################################################################
 
-# We assume that the provided glyph images will be an atlas of characters arranged in this pattern
-# We also assume that the characters in this atlas have a single space between them
-atlasLayout = "!\"#$%_&'()*+ 1234567890-= QWERTYUIOP¼ qwertyuiop½ ASDFGHJKL:@ asdfghjkl;¢ ZXCVBNM,.? zxcvbnm,./".split /\s/
-
-# Top left corner in atlas — just eyeball it
-sx = 75
-sy = 110
+# Each strike & ribbon colour has an image of every glyph, set out in a grid of cells in the order glyphs/layout.json
+# lists them. docs/build-glyphs.py makes them, from the typewriter's own scans and the hand-drawn character sheets.
+atlas = null # glyphs/layout.json, once it's loaded
 
 # Size of glyphs in the atlas
 gw = atlasDPI / charactersPerInch
@@ -101,52 +97,64 @@ gh = atlasDPI / 8
 # Shift the glyph down within its line so it sits nicely under the caret
 verticalAlign = gh * .15
 
-# How much extra space around the glyph should we include when copying the glyph from the atlas to the canvas?
-# When this is zero, glyphs sometimes get cut off. If it's too big, you'll see bits of neighbouring glyphs.
-pad = gw * 0.4
+# How much room around a glyph to copy with it from the atlas to the canvas: across, enough that nothing gets cut off;
+# up and down, enough for an accent over a capital or a tail under the line
+padX = gw * 0.4
+padY = gh * 2 / 3
 
-# The atlases are slightly rotated, so this tries to compensate
-skew = 1.3
-
-# Typographer's punctuation that the typewriter doesn't have, mapped to the keys you'd actually strike (until the atlas has its own)
-substitutions = "‘": "'", "’": "'", "“": "\"", "”": "\"", "–": "-", "—": "-", "×": "x"
-
-# This function returns the x,y pixel position within the atlas for a given character, or null if the character isn't in the atlas.
-# The characters in the atlas have a single space between them, and the lines are double-spaced, so we multiply positions by 2 in both directions.
+# The x,y pixel position within the atlas of a character's glyph, or nulls if the atlas doesn't have it
 getGlyphPosInAtlas = (c)->
-  for row, y in atlasLayout
-    x = row.indexOf c
-    if x isnt -1
-      px = sx + (2 * x * gw)
-      py = sy + (2 * y * gh) - x * skew # Compensate for the atlases being slightly tilted
-      return [px, py]
-  [null, null]
+  i = atlas?.index.get c
+  return [null, null] unless i?
+  [(i % atlas.columns) * atlas.cellWidth + atlas.glyphX, Math.floor(i / atlas.columns) * atlas.cellHeight + atlas.glyphY]
 
+# How to strike a character: a list of [x, y, lift] for each glyph struck at its place, empty if it can't be.
+# A character the type doesn't have is struck with one that looks the same (✔ with ✓, ⇒ with →); a letter with an
+# accent it doesn't have, as the letter with the accent struck over it, the way a typist would.
 glyphCache = {}
 glyph = (c)->
   glyphCache[c] ?= do ()->
-    [gx, gy] = getGlyphPosInAtlas c
-    [gx, gy] = getGlyphPosInAtlas substitutions[c] if not gx? and substitutions[c]?
-    [gx, gy]
+    for k in [c, atlas?.lookalikes[c]] when k?
+      [gx, gy] = getGlyphPosInAtlas k
+      return [[gx, gy, 0]] if gx?
+    [letter, marks...] = Array.from c.normalize "NFD"
+    letter = "ı" if letter is "i"
+    [gx, gy] = getGlyphPosInAtlas atlas?.lookalikes[letter] ? letter
+    return [] unless gx? and marks.length
+    parts = [[gx, gy, 0]]
+    for mark in marks
+      accent = atlas.overstrikes[mark]
+      [ax, ay] = getGlyphPosInAtlas accent
+      return [] unless ax?
+      # An accent over a letter goes on the line for a capital or a lowercase one; one under it hangs as it is
+      lift = if accent in atlas.hanging then 0
+      else atlas.accentLine[if letter is letter.toLowerCase() then "low" else "cap"] - atlas.accentBottom[accent]
+      parts.push [ax, ay, lift]
+    parts
 
 # These images store the glyph atlases, one per strike & ribbon colour
 atlases = {}
-atlasNames = ["regular", "light", "double", "regular-red", "light-red"]
+atlasNames = ["regular", "light", "double", "regular-red", "light-red", "double-red"]
 
-atlasFor = (style)->
-  name = style.weight + (if style.red then "-red" else "")
-  name = "regular-red" if name is "double-red" # There's no red double struck scan
-  atlases[name]
+atlasFor = (style)-> atlases[style.weight + (if style.red then "-red" else "")]
 
 loadAtlases = ()->
   loaded = 0
+  done = ()-> document.body.classList.add "ready" if ++loaded is atlasNames.length + 1
+  fetch("glyphs/layout.json").then((r)-> r.json()).then (layout)->
+    atlas = Object.assign layout, index: new Map Array.from(layout.chars).map (c, i)-> [c, i]
+    glyphCache = {}
+    reparse() # characters written by name print once their names are known
+    invalidate()
+    renderSelection()
+    done()
   for name in atlasNames
     do (name)->
       img = new Image()
       img.onload = ()->
         atlases[name] = img
         invalidate()
-        document.body.classList.add "ready" if ++loaded is atlasNames.length
+        done()
       img.src = "glyphs/#{name}.png"
 
 # STYLE ###########################################################################################
@@ -192,6 +200,7 @@ alignAt = (text, codes, i)-> styleAlign codes[paragraphStart text, i] ? encodeSt
 #   ~~struck through~~   ~~~X'd out~~~   and a whole line wrapped in -> and <- is centred, or in -> and -> flush right
 #   # A heading (any level) is double struck & underlined, the way a typist would set one off
 # A backslash makes the next marker character print as itself.
+#   &frac12; &rarr; &#189; &#xBD; — a character written by its name or number prints as the character
 
 delimiters = # marker character → length of the run → what it does
   "*": {1: "underline", 2: "double"}
@@ -199,12 +208,21 @@ delimiters = # marker character → length of the run → what it does
   "`": {1: "light"}
   "=": {2: "red"}
   "~": {2: "strike", 3: "xout"}
-escapable = "*_`=~\\-<#|"
+escapable = "*_`=~\\-<#|&"
 wordChar = /[\p{L}\p{N}]/u
 blankChar = /\s/
 
+# A character written by its name or number, the way Markdown (and HTML) spells them: the length of what's written at
+# i in s, and the character it stands for, if it's one the type can strike
+characterAt = (s, i)->
+  return null unless s[i] is "&" and m = s.slice(i, i + 40).match /^&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));/
+  code = if m[1] then +m[1] else if m[2] then parseInt m[2], 16
+  c = if code? then (if code <= 0xFFFF then String.fromCharCode code) else atlas?.names[m[3]]
+  if c and glyph(c).length then [m[0].length, c] else null
+
 # Read one line (without its line break). kinds says what each raw character is: "text" (printed), "open" or
-# "close" (an inline marker), "blockOpen" or "blockClose" (the centring arrows), or "escape" (a backslash).
+# "close" (an inline marker), "blockOpen" or "blockClose" (the centring arrows), "escape" (a backslash), or "entity"
+# then "entityTail" (a character written by its name or number, which prints as one).
 parseLine = (line)->
   n = line.length
   kinds = new Array(n).fill "text"
@@ -229,7 +247,7 @@ parseLine = (line)->
   spans = parseInline line, start, end, kinds
   styles = new Array n
   base = if heading then {weight: "double", underline: true, heading} else {weight: "regular"}
-  styles[x] = Object.assign {}, base, alignStyle align for x in [0...n] when kinds[x] is "text"
+  styles[x] = Object.assign {}, base, alignStyle align for x in [0...n] when kinds[x] in ["text", "entity"]
   applySpans styles, spans, kinds
   {kinds, styles, align, heading}
 
@@ -245,6 +263,10 @@ parseInline = (line, start, end, kinds)->
     else if c is "\\" and i + 1 < end and line[i + 1] in escapable
       kinds[i] = "escape"
       i += 2
+    else if (ent = characterAt line, i) and i + ent[0] <= end
+      kinds[i] = "entity"
+      kinds[y] = "entityTail" for y in [i + 1...i + ent[0]]
+      i += ent[0]
     else if delimiters[c]?
       j = i
       j++ while j < end and line[j] is c
@@ -283,7 +305,7 @@ parseInline = (line, start, end, kinds)->
 applySpans = (styles, spans, kinds)->
   spans.sort (a, b)-> (b.to - b.from) - (a.to - a.from)
   for span in spans
-    for x in [span.from...span.to] when kinds[x] in ["text", "br"]
+    for x in [span.from...span.to] when kinds[x] in ["text", "br", "entity"]
       if span.type in weights then styles[x].weight = span.type else styles[x][span.type] = true
   styles
 
@@ -356,7 +378,7 @@ parseRow = (line, aligns, header)->
       else
         x++
     spans = parseInline line, a, z, kinds
-    styles[x] = Object.assign {}, base for x in [a...z] when kinds[x] in ["text", "br"]
+    styles[x] = Object.assign {}, base for x in [a...z] when kinds[x] in ["text", "br", "entity"]
     applySpans styles, spans, kinds
     # The pipe after each cell (or the end of the row) carries that cell's column alignment
     if ce < last
@@ -427,6 +449,7 @@ parseMarkdown = (raw)->
         kinds.push kind
         printed = switch kind
           when "text" then line.text[x]
+          when "entity" then characterAt(line.text, x)[1]
           when "sep" then cellBreak
           when "br" then cellLineBreak
         if printed?
@@ -512,6 +535,7 @@ writeLine = (chars, styles, align, heading, opts)->
       if c is cellLineBreak then (if opts.cell then "<br>" else " ")
       else if c is cellBreak then " " # A cell boundary that's ended up outside a table is just a space
       else if c is "|" and opts.cell then "\\|"
+      else if c is "&" then (if characterAt chars.slice(i, i + 40).join(""), 0 then "\\&" else c) # an & that would read as a name prints as typed
       else if opts.escape and c in escapable then "\\" + c
       else c
   out += markerFor type, opts for type in stack.slice().reverse()
@@ -861,6 +885,8 @@ caretElm = $ ".caret"
 input = $ ".input"
 deckElm = $ ".ui"
 formatMenu = $ ".format"
+handles = start: $(".handle.start"), end: $(".handle.end")
+loupe = $ ".loupe"
 
 # A page's link (/s/<id>) has the page built into it, as the server has it
 shared = window.sharedPage
@@ -1003,9 +1029,9 @@ drawPage = (ctx, p, ppi)->
   {start, end} = layout.pages[p]
   text = layout.text
   strike = (img, c, px, py)->
-    [gx, gy] = glyph c
-    return unless gx? # A key the machine doesn't have strikes nothing, leaving a blank space
-    ctx.drawImage img, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
+    # A key the machine doesn't have strikes nothing, leaving a blank space
+    for [gx, gy, lift] in glyph c
+      ctx.drawImage img, gx - padX, gy - padY, gw + padX*2, gh + padY*2, px - padX, py - padY + lift, gw + padX*2, gh + padY*2
 
   # Where a line wraps in the middle of an underlined (or struck through, or X'd out) phrase, the typist stops at the
   # last letter on the line and starts again at the first one on the next: the spaces around the wrap go bare
@@ -1086,6 +1112,7 @@ caretPoint = (i)->
   h: pxPerInch / linesPerInch
 
 focusIndex = ()->
+  return Math.min dragged[1], layout.n if dragged?
   Math.min visAt(if input.selectionDirection is "backward" then input.selectionStart else input.selectionEnd), layout.n
 
 # Keep a lone caret out of the middle of a marker, so whatever's typed lands where it looks like it will
@@ -1100,14 +1127,14 @@ normalizeCaret = ()->
 
 renderSelection = ()->
   return unless layout? and pageViews.length
-  normalizeCaret() unless applying
+  normalizeCaret() unless applying or composing or dragged?
   [a, b] = selected()
 
   # Caret goes on the moving end of the selection
   focus = focusIndex()
   c = caretPoint focus
   Object.assign caretElm.style, left: c.x - 1 + "px", top: c.y + "px", height: c.h + "px"
-  Object.assign input.style, left: c.x + "px", top: c.y + "px", height: c.h + "px"
+  Object.assign input.style, left: c.x + "px", top: c.y + "px", height: c.h + "px" unless composing or dragged?
 
   # Restart the blink so the caret is visible while it's moving
   caretElm.style.animation = "none"
@@ -1126,8 +1153,28 @@ renderSelection = ()->
       x1 = if last + 1 <= ln.end then caretPoint(last + 1).x else caretPoint(last).x + pxPerInch / charactersPerInch
       rects.push "<div style='left:#{p0.x}px;top:#{p0.y}px;width:#{Math.max 2, x1 - p0.x}px;height:#{p0.h}px'></div>"
   selectionElm.innerHTML = rects.join ""
+  renderHandles a, b
   renderFormatMenu()
   syncAlign()
+
+# Where a selection ending before b is drawn to: just after its last character, on that character's line
+selectionEndPoint = (b)->
+  last = Math.max 0, b - 1
+  ln = layout.lines[lineIndexOf last]
+  p = caretPoint last
+  x: (if last + 1 <= ln.end then caretPoint(last + 1).x else p.x + pxPerInch / charactersPerInch), y: p.y, h: p.h
+
+# On a touch screen, a selection has a handle at each end to drag it by, the way iOS does
+touchScreen = false # whether the page was last reached for with a finger
+renderHandles = (a, b)->
+  show = a < b and touchScreen and document.activeElement is input and not viewing
+  handles.start.hidden = handles.end.hidden = not show
+  caretElm.classList.toggle "under-handles", show # the handles show where the selection ends, as the caret would
+  return unless show
+  s = caretPoint a
+  e = selectionEndPoint b
+  Object.assign handles.start.style, left: s.x + "px", top: s.y - 20 + "px", height: s.h + 20 + "px"
+  Object.assign handles.end.style, left: e.x + "px", top: e.y + "px", height: e.h + 20 + "px"
 
 # When the sheet is wider than the screen, it slides side to side like a carriage. Typing brings the strike
 # point to the middle; clicking, tapping, and selecting leave the sheet where it is, so you can aim at it.
@@ -1178,10 +1225,25 @@ rawAtIn = (d, k)->
   r-- while r > 0 and d.kinds[r - 1] in ["open", "blockClose", "escape", "delimiter"]
   r
 rawAt = (k)-> rawAtIn doc, k
+
+# The style a character typed at the caret takes on: whatever spans the Markdown around it puts it in
+styleAtCaret = ()->
+  r = input.selectionStart
+  decodeStyle parseMarkdown(input.value.slice(0, r) + "x" + input.value.slice(r)).styles[visAt r]
 visAt = (r)-> doc.visBefore[clamp r, 0, doc.raw.length]
 
 # The selection, in printed characters
-selected = ()-> [visAt(input.selectionStart), visAt(input.selectionEnd)]
+selected = ()->
+  return [Math.min(dragged...), Math.max(dragged...)] if dragged?
+  [visAt(input.selectionStart), visAt(input.selectionEnd)]
+
+# While the selection is being dragged out on a touch screen it's drawn as it goes, but only handed to the textarea when
+# the finger lifts: iOS answers every change to a focused field's selection (scrolling to show it, updating the
+# keyboard's suggestions), which would make the drag stutter and jump
+dragged = null # [anchor, focus], in printed characters
+dragTo = (anchor, focus)->
+  dragged = [clamp(anchor, 0, layout.n), clamp(focus, 0, layout.n)]
+  renderSelection()
 
 applying = false
 
@@ -1246,10 +1308,11 @@ tableStructureIn = (a, b)->
       keepCodes += styles[x]
   [keep, keepCodes]
 
-typeText = (str)->
+# base: the style of what's typed at a caret (plain, unless it's given)
+typeText = (str, base = {})->
   [a, b] = selected()
   {text} = doc
-  style = if a < b then decodeStyle doc.styles[a] else {}
+  style = if a < b then decodeStyle doc.styles[a] else base
   Object.assign style, alignStyle alignAt text, doc.styles, a
   if inTable a
     # Typing in a table: the row's flags come along, and Return breaks the line inside the cell — except at the end
@@ -1313,9 +1376,11 @@ deleteFor = (inputType)->
 # Every edit that could split or join a span goes through the paragraph rewriter. Plain typing goes straight in, so
 # typing Markdown by hand works too.
 input.addEventListener "beforeinput", (e)->
-  return if applying
-  [a, b] = selected()
   t = e.inputType
+  # An accent typed with a dead key (Option-n, then n, for ñ), or any input method, is the browser's to finish: Safari
+  # replaces the pending ˜ with the ñ by "deleting" it, which mustn't be taken for a press of the delete key
+  return if applying or composing or e.isComposing or /Composition/.test t
+  [a, b] = selected()
   emptyAlignedLine = a is b and alignAt(doc.text, doc.styles, a) isnt "left" and paragraphStart(doc.text, a) is a and
     doc.text[a] in [undefined, "\n", "\f"] and not input.value.slice(0, input.selectionStart).endsWith "->"
   # The first letter typed into an empty table cell rewrites the row, so it reads "| ok |" rather than "| ok|"
@@ -1332,37 +1397,31 @@ input.addEventListener "beforeinput", (e)->
     e.preventDefault()
     deleteFor t
 
-# Pasting over a selection replaces it in one step, so one undo takes it back. Plain text takes on the style of what
-# it replaces, like typing over it; pasted Markdown keeps its own. (The paste event is the one that reliably carries
-# the clipboard's text.)
-input.addEventListener "paste", (e)->
+# Pasting goes through the paragraph rewriter, like any edit that could split or join a span, so what's pasted and the
+# Markdown around it can't run together: ==Continued== pasted after ==Note== would otherwise read ==Note====Continued==,
+# and neither would be red. Plain text takes on the style of what it replaces, like typing over it, or at a caret, the
+# style typing there would get; pasted Markdown keeps its own. One undo takes a paste back. (The paste event is the one
+# that reliably carries the clipboard's text.)
+pasteText = (pasted)->
+  pasted = pasted.replace /\r\n?/g, "\n"
   [a, b] = selected()
-  return unless a < b
-  pasted = e.clipboardData?.getData("text/plain") ? ""
+  parsed = parseMarkdown pasted
+  if parsed.text.length is pasted.length
+    typeText pasted, (if a is b then styleAtCaret())
+  else
+    edit a, b, parsed.text, parsed.styles.slice 0, parsed.text.length
+
+input.addEventListener "paste", (e)->
   e.preventDefault()
-  return typeText pasted if parseMarkdown(pasted).text.length is pasted.length
-  {text, styles} = doc
-  [keep, keepCodes] = tableStructureIn a, b
-  start = paragraphStart text, a
-  end = paragraphEnd text, b
-  newEnd = end - (b - a) + keep.length
-  codes = (styles.slice(0, a) + keepCodes + styles.slice(b)).slice start, newEnd + (if end is text.length then 1 else 0)
-  md = serializeBlock (text.slice(0, a) + keep + text.slice(b)).slice(start, newEnd), codes
-  at = rawAtIn parseMarkdown(md), a - start
-  rawStart = if start is 0 then 0 else doc.rawOf[start - 1] + 1
-  rawEnd = if end is text.length then doc.raw.length else doc.rawOf[end - 1] + 1
-  replaceRaw rawStart, rawEnd, md.slice(0, at) + pasted + md.slice(at)
-  caret = rawStart + at + pasted.length
-  input.setSelectionRange caret, caret
-  renderSelection()
-  followCaret()
+  pasteText e.clipboardData?.getData("text/plain") ? ""
 
 # Copy and cut write well-formed Markdown, even when the selection starts or ends inside a span
+markdownOf = (a, b)-> serializeBlock doc.text.slice(a, b), doc.styles.slice(a, b) + encodeStyle {}
 copyMarkdown = (e)->
   [a, b] = selected()
   return false unless a < b
   e.preventDefault()
-  e.clipboardData.setData "text/plain", serializeBlock doc.text.slice(a, b), doc.styles.slice(a, b) + encodeStyle {}
+  e.clipboardData.setData "text/plain", markdownOf a, b
   true
 input.addEventListener "copy", copyMarkdown
 input.addEventListener "cut", (e)->
@@ -1489,11 +1548,21 @@ tabToCell = (back)->
         edit e, e, row, styles[e] + boundCodes, select: [e + 1, e + 1], endPatch: {header: false}
 
 # A little menu that pops up over a selection, for striking it differently
+# On a touch screen it also has Cut, Copy, Paste & Select All, and tapping the caret brings up what can be done there.
+caretMenuAt = null # where the caret was tapped for its menu
+menuPutAway = null # the selection the menu was put away from, after copying it
 renderFormatMenu = ()->
   [a, b] = selected()
-  show = a < b and not pointer? and document.activeElement is input and not viewing
+  atCaret = a is b and a is caretMenuAt and touchScreen
+  show = (a < b or atCaret) and not pointer? and document.activeElement is input and not viewing and
+    menuPutAway isnt "#{a} #{b}"
   formatMenu.hidden = not show
   return unless show
+  formatMenu.classList.toggle "touch", touchScreen
+  formatMenu.classList.toggle "at-caret", atCaret
+  formatMenu.classList.toggle "all", a is 0 and b is layout.n
+  placeFormatMenu a, b
+  return if atCaret
 
   # Line breaks, cell breaks, and the spaces at the ends of lines never carry a span (Markdown has nowhere to put it),
   # so only the printed letters count when showing whether the selection is already struck that way
@@ -1506,6 +1575,7 @@ renderFormatMenu = ()->
     btn.classList.toggle "active", sel.every (style)-> style[btn.dataset.toggle]
   formatMenu.querySelector("[data-caps]").classList.toggle "active", isCaps doc.text.slice a, b
 
+placeFormatMenu = (a, b)->
   first = caretPoint a
   menuH = formatMenu.offsetHeight
   pageTop = pageViews[layout.pos[a][0]].elm.offsetTop
@@ -1516,6 +1586,26 @@ renderFormatMenu = ()->
 
 for btn in formatMenu.querySelectorAll ".row > button"
   btn.addEventListener "pointerdown", (e)-> e.preventDefault() # Keep the selection while choosing
+
+editActions =
+  cut: ()->
+    [a, b] = selected()
+    return if document.execCommand "cut" # goes through the textarea's own cut, as Markdown
+    navigator.clipboard?.writeText(markdownOf a, b).then ()-> edit a, b, "", ""
+  copy: ()->
+    [a, b] = selected()
+    navigator.clipboard?.writeText markdownOf a, b unless document.execCommand "copy"
+    menuPutAway = "#{a} #{b}"
+    renderFormatMenu()
+  paste: ()-> navigator.clipboard?.readText().then (text)-> pasteText text if text
+  select: ()-> setSelection expand(focusIndex(), 2)..., false
+  all: ()-> setSelection 0, layout.n, false
+for btn in formatMenu.querySelectorAll "[data-edit]"
+  do (btn)-> btn.onclick = ()->
+    caretMenuAt = null
+    editActions[btn.dataset.edit]()
+
+for btn in formatMenu.querySelectorAll ".row:not(.edit) > button"
   do (btn)-> btn.onclick = ()->
     if btn.dataset.weight?
       # Light & double struck turn back to regular when pressed again
@@ -1610,7 +1700,7 @@ syncControls = ()->
   null
 
 # Hand the keyboard back to the page after pressing a key on the machine
-for elm in document.querySelectorAll ".buttons button:not(#paper):not(#import)"
+for elm in document.querySelectorAll ".buttons button:not(#paper):not(#characters):not(#import)"
   elm.addEventListener "click", ()-> input.focus preventScroll: true
 
 # PAPER CHOOSER ###################################################################################
@@ -1729,6 +1819,59 @@ for btn in chooser.querySelectorAll "[data-landscape]"
 
 chooser.onclick = (e)-> closeChooser() if e.target is chooser or e.target.matches ".sheets"
 document.addEventListener "keydown", (e)-> closeChooser() if e.key is "Escape" and not chooser.hidden
+
+# CHARACTER KEY ###################################################################################
+
+# Press the character key, and every character the machine strikes that isn't on the keyboard is laid out on the
+# desk, struck in its own type. Pick one to type it. Pointing at one shows the name it can also be written by.
+
+characters = $ ".characters"
+charactersKey = $ "#characters"
+charactersKey.onclick = ()-> openCharacters()
+
+openCharacters = ()->
+  return unless atlas?
+  renderCharacters() unless characters.querySelector ".keys button"
+  characters.hidden = false
+  document.body.classList.add "choosing"
+  characters.querySelector(".keys button")?.focus preventScroll: true
+
+closeCharacters = ()->
+  characters.hidden = true
+  document.body.classList.remove "choosing"
+  input.focus preventScroll: true
+  scrollCaretIntoView()
+
+renderCharacters = ()->
+  keys = characters.querySelector ".keys"
+  keys.innerHTML = ""
+  scale = 0.42 # CSS px per atlas pixel
+  names = {}
+  names[c] ?= name for name, c of atlas.names
+  for c in Array.from(atlas.chars) when c.codePointAt(0) > 127
+    do (c)->
+      [gx, gy] = getGlyphPosInAtlas c
+      key = document.createElement "button"
+      code = "U+" + c.codePointAt(0).toString(16).toUpperCase().padStart 4, "0"
+      key.title = [c, code, (if names[c] then "&#{names[c]};")].filter(Boolean).join "  "
+      key.setAttribute "aria-label", c
+      face = document.createElement "span"
+      face.className = "glyph"
+      Object.assign face.style,
+        width: (gw + padX * 2) * scale + "px"
+        height: (gh + padY * 2) * scale + "px"
+        backgroundImage: "url(glyphs/regular.png)"
+        backgroundSize: "#{atlas.columns * atlas.cellWidth * scale}px auto"
+        backgroundPosition: "#{-(gx - padX) * scale}px #{-(gy - padY) * scale}px"
+      key.append face
+      key.onclick = ()->
+        closeCharacters()
+        insertText c
+      keys.append key
+  null
+
+characters.onclick = (e)-> closeCharacters() if e.target is characters or e.target.matches ".keys"
+document.addEventListener "keydown", (e)-> closeCharacters() if e.key is "Escape" and not characters.hidden
 
 # STOPS ###########################################################################################
 
@@ -1898,6 +2041,7 @@ setSelection = (anchor, focus, follow = true)->
   followCaret() if follow
 
 getAnchorFocus = ()->
+  return dragged.slice() if dragged?
   [a, b] = selected()
   if input.selectionDirection is "backward" then [b, a] else [a, b]
 
@@ -1937,6 +2081,8 @@ moveToLineEdge = (end, extend)->
 isMac = /Mac|iPhone|iPad/.test navigator.platform
 
 input.addEventListener "keydown", (e)->
+  caretMenuAt = null
+  return if e.isComposing or e.keyCode is 229 # keys that are part of an accent or input method go to it
   mod = if isMac then e.metaKey else e.ctrlKey
   verticalKey = e.key in ["ArrowUp", "ArrowDown", "PageUp", "PageDown"]
   goalCol = null unless verticalKey
@@ -1976,19 +2122,31 @@ input.addEventListener "keydown", (e)->
       followCaret()
 
 input.addEventListener "input", (e)->
+  caretMenuAt = null
   reparse()
   saveText()
   syncTitle()
   publishSoon()
   render()
-  followCaret() unless applying # A rewrite puts the selection back itself, and decides whether to follow it
+  followCaret() unless applying or composing # A rewrite puts the selection back itself, and decides whether to follow it
+
+# While an accent or input method is part way through, leave the textarea and its caret be: moving either can make the
+# browser give up on what's being composed
+composing = false
+input.addEventListener "compositionstart", ()-> composing = true
+input.addEventListener "compositionend", ()->
+  composing = false
+  renderSelection()
+  followCaret()
 
 for type in ["select", "selectionchange", "keyup"]
   input.addEventListener type, ()-> renderSelection()
 document.addEventListener "selectionchange", ()->
   renderSelection() if document.activeElement is input
 
-updateFocus = ()-> document.body.classList.toggle "focused", document.activeElement is input
+updateFocus = ()->
+  document.body.classList.toggle "focused", document.activeElement is input
+  renderHandles selected()... if layout? and pageViews.length
 input.addEventListener "focus", updateFocus
 input.addEventListener "blur", ()->
   updateFocus()
@@ -2036,14 +2194,30 @@ clickCount = (e)->
   lastClick = time: e.timeStamp, x: e.clientX, y: e.clientY, count: if near and quick then lastClick.count % 3 + 1 else 1
   lastClick.count
 
+# On a touch screen, things go the way iOS has them: a tap places the carriage (and a tap on the caret brings up its
+# menu), touching and holding drags the caret, a double tap selects a word and a triple tap a line, holding after one
+# drags the selection out a word (or line) at a time, and a selection's handles drag either end. A sideways swipe
+# slides the sheet, and an up-down one scrolls.
 pagesElm.addEventListener "pointerdown", (e)->
   return unless e.target.closest ".page"
   return if e.target.closest ".strip, .vstop, .lever"
   return if e.button isnt 0
+  touchScreen = e.pointerType is "touch"
+  menuPutAway = null
 
-  # On touch screens, a tap places the carriage, a sideways swipe slides the sheet, and an up-down drag scrolls
   if e.pointerType is "touch"
-    pointer = touch: true, x: e.clientX, y: e.clientY, tx: carriageX, sliding: false
+    return startHandleDrag which, e if which = handleNear e
+    focused = document.activeElement is input
+    pointer = touch: true, x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, tx: carriageX, sliding: false,
+    count: clickCount(e), was: (if focused then selected() else null)
+    if pointer.count >= 2
+      input.focus preventScroll: true
+      caretMenuAt = goalCol = null
+      [a, b] = expand hitTest(e), pointer.count
+      setSelection a, b, false
+      pointer.span = [a, b]
+    else
+      pointer.hold = setTimeout holdCaret, 500
     return
 
   e.preventDefault()
@@ -2062,10 +2236,174 @@ pagesElm.addEventListener "pointerdown", (e)->
     pointer = {anchor}
   pagesElm.setPointerCapture e.pointerId
 
+# Touching and holding still picks up the caret, to drag where it's wanted
+holdCaret = ()->
+  return unless pointer?.touch and not pointer.sliding
+  pointer.caret = true
+  input.focus preventScroll: true
+  caretMenuAt = goalCol = null
+  dragSelection()
+
+# A handle is picked up by a touch on it or near it, like iOS's: anywhere close to its bar or knob
+startHandleDrag = (which, e)->
+  [a, b] = selected()
+  # Where the handle's end of the selection is, so the finger moves it from wherever it took hold
+  at = if which is "start" then caretPoint a else selectionEndPoint b
+  box = pagesElm.getBoundingClientRect()
+  pointer = cx: e.clientX, cy: e.clientY, handle:
+    which: which, fixed: (if which is "start" then b else a)
+    dx: box.left + at.x - e.clientX, dy: box.top + at.y + at.h / 2 - e.clientY
+  pagesElm.setPointerCapture e.pointerId
+  renderFormatMenu()
+
+handleNear = (e)->
+  best = null
+  for which, handle of handles when not handle.hidden
+    r = handle.getBoundingClientRect()
+    reach = 16
+    continue unless r.left - reach <= e.clientX <= r.right + reach and r.top - reach <= e.clientY <= r.bottom + reach
+    d = Math.hypot e.clientX - (r.left + r.right) / 2, e.clientY - (r.top + r.bottom) / 2
+    best = {which, d} if not best? or d < best.d
+  best?.which
+
+for which, handle of handles
+  do (which, handle)->
+    handle.addEventListener "pointerdown", (e)->
+      e.preventDefault()
+      touchScreen = e.pointerType is "touch"
+      startHandleDrag which, e
+    # Keep the keyboard up, and the selection with it
+    handle.addEventListener "touchstart", ((e)-> e.preventDefault()), passive: false
+
+# Move whichever end of the selection is being dragged to where the finger is
+dragSelection = ()->
+  return unless pointer?
+  {cx, cy} = pointer
+  if pointer.handle?
+    {which, fixed, dx, dy} = pointer.handle
+    i = hitTest clientX: cx + dx, clientY: cy + dy
+    # Like iOS, the handles don't cross: there's always at least a character between them
+    if which is "start"
+      i = Math.min i, fixed - 1
+      dragTo fixed, i
+      showLoupe caretPoint i
+    else
+      i = Math.max i, fixed + 1
+      dragTo fixed, i
+      showLoupe selectionEndPoint Math.min i, layout.n
+  else if pointer.caret
+    i = hitTest clientX: cx, clientY: cy
+    dragTo i, i
+    showLoupe caretPoint i
+  else if pointer.span?
+    [a, b] = pointer.span
+    [s, t] = expand hitTest(clientX: cx, clientY: cy), pointer.count
+    if s < a
+      dragTo b, s
+      showLoupe caretPoint s
+    else
+      dragTo a, Math.max(b, t)
+      showLoupe selectionEndPoint Math.max b, t
+
+dragging = ()-> pointer? and (pointer.handle? or pointer.caret or pointer.span?)
+
+# Dragged to the top of the screen, or down to the machine, the page scrolls to take the selection further; dragged
+# to either side, the sheet slides along like the carriage
+scrollWhileDragging = ()->
+  speeds = ()->
+    return [0, 0] unless dragging()
+    edge = (by_)-> Math.min 20, 2 + by_ / 3
+    # What's in view: above the keyboard, if it's up, and the machine
+    view = visibleArea()
+    top = view.top + 48
+    bottom = Math.min(view.bottom, deckElm.getBoundingClientRect().top) - 24
+    left = view.left + 32
+    right = view.right - 32
+    vx = if pointer.cx < left then -edge(left - pointer.cx) else if pointer.cx > right then edge(pointer.cx - right) else 0
+    vy = if pointer.cy < top then -edge(top - pointer.cy) else if pointer.cy > bottom then edge(pointer.cy - bottom) else 0
+    [vx, vy]
+  return if pointer.scrolling or speeds().every (v)-> v is 0
+  pointer.scrolling = true
+  pagesElm.classList.add "sliding"
+  step = ()->
+    [vx, vy] = speeds()
+    if vx is 0 and vy is 0
+      pointer?.scrolling = false
+      return
+    window.scrollBy 0, vy
+    slideCarriage carriageX - vx if vx
+    dragSelection()
+    requestAnimationFrame step
+  requestAnimationFrame step
+
+# The part of the window that can be seen, in the same terms as the pointer: less the keyboard, when it's up
+visibleArea = ()->
+  v = window.visualViewport
+  return {left: 0, top: 0, right: innerWidth, bottom: innerHeight} unless v?
+  left: v.offsetLeft, top: v.offsetTop, right: v.offsetLeft + v.width, bottom: v.offsetTop + v.height
+
+# The loupe: the type around a point on the pages (where the caret or a handle is), magnified, above the finger
+loupeW = 132
+loupeH = 48
+loupeZoom = 1.75
+showLoupe = (pt)->
+  view = null
+  view = v for v in pageViews when v.elm.offsetTop <= pt.y
+  return hideLoupe() unless view?
+  dpr = window.devicePixelRatio or 1
+  unless loupe.width is Math.round loupeW * dpr
+    loupe.width = Math.round loupeW * dpr
+    loupe.height = Math.round loupeH * dpr
+    Object.assign loupe.style, width: loupeW + "px", height: loupeH + "px"
+  ctx = loupe.getContext "2d"
+  ctx.setTransform dpr, 0, 0, dpr, 0, 0
+  ctx.fillStyle = getComputedStyle(document.body).backgroundColor
+  ctx.fillRect 0, 0, loupeW, loupeH
+  # What's in view, in CSS px on the .pages container
+  sw = loupeW / loupeZoom
+  sh = loupeH / loupeZoom
+  sx = pt.x - sw / 2
+  sy = pt.y + pt.h / 2 - sh / 2
+  k = view.canvas.width / view.elm.offsetWidth
+  ox = view.elm.offsetLeft
+  oy = view.elm.offsetTop
+  # Safari draws nothing if the source reaches past the edge of the canvas, so take only what's on it
+  x0 = Math.max sx, ox
+  y0 = Math.max sy, oy
+  x1 = Math.min sx + sw, ox + view.elm.offsetWidth
+  y1 = Math.min sy + sh, oy + view.elm.offsetHeight
+  if x1 > x0 and y1 > y0
+    ctx.drawImage view.canvas, (x0 - ox) * k, (y0 - oy) * k, (x1 - x0) * k, (y1 - y0) * k,
+      (x0 - sx) * loupeZoom, (y0 - sy) * loupeZoom, (x1 - x0) * loupeZoom, (y1 - y0) * loupeZoom
+  # The selection, and the caret or handle
+  ctx.fillStyle = "hsla(30, 5%, 30%, .18)"
+  for r in selectionElm.children
+    ctx.fillRect (r.offsetLeft - sx) * loupeZoom, (r.offsetTop - sy) * loupeZoom,
+      r.offsetWidth * loupeZoom, r.offsetHeight * loupeZoom
+  ctx.fillStyle = getComputedStyle(caretElm).backgroundColor
+  ctx.fillRect (pt.x - sx) * loupeZoom - 1, (pt.y - sy) * loupeZoom, 2, pt.h * loupeZoom
+  # Above the line, clear of the finger, and on screen
+  box = pagesElm.getBoundingClientRect()
+  view = visibleArea()
+  left = clamp box.left + pt.x - loupeW / 2, view.left + 8, view.right - loupeW - 8
+  top = Math.max view.top + 8, box.top + pt.y - loupeH - 28
+  Object.assign loupe.style, left: left + "px", top: top + "px"
+  loupe.hidden = false
+
+hideLoupe = ()-> loupe.hidden = true
+
 pagesElm.addEventListener "pointermove", (e)->
   return unless pointer?
-  if pointer.touch
+  if dragging()
+    pointer.cx = e.clientX
+    pointer.cy = e.clientY
+    dragSelection()
+    scrollWhileDragging()
+  else if pointer.touch
     dx = e.clientX - pointer.x
+    if Math.hypot(dx, e.clientY - pointer.y) > 10
+      clearTimeout pointer.hold
+      pointer.moved = true
     if not pointer.sliding and Math.abs(dx) > 8 and Math.abs(dx) > Math.abs(e.clientY - pointer.y)
       pointer.sliding = true
       pagesElm.classList.add "sliding"
@@ -2073,25 +2411,44 @@ pagesElm.addEventListener "pointermove", (e)->
   else
     setSelection pointer.anchor, hitTest(e), false
 
+# Once the caret or the selection is being dragged, the finger's moves are for it, not for scrolling
+pagesElm.addEventListener "touchmove", ((e)-> e.preventDefault() if dragging()), passive: false
+
 pagesElm.addEventListener "pointerup", (e)->
-  if pointer?.touch and not pointer.sliding and Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) < 10
-    pointer = null
+  return unless pointer?
+  clearTimeout pointer.hold
+  if dragging()
+    input.focus preventScroll: true
+  else if pointer.touch and not pointer.sliding and not pointer.moved
     input.focus preventScroll: true
     goalCol = null
     i = hitTest e
-    count = clickCount e
-    if count >= 2 then setSelection expand(i, count)..., false else setSelection i, i, false
+    # A tap on the caret brings up its menu, and another puts it away; anywhere else moves the caret there
+    [a, b] = pointer.was ? [-1, -1]
+    if a is b is i
+      caretMenuAt = if caretMenuAt is i then null else i
+    else
+      caretMenuAt = null
+      setSelection i, i, false
+  endPointer()
+
+pagesElm.addEventListener "pointercancel", ()->
+  clearTimeout pointer?.hold
+  endPointer()
+
+endPointer = ()->
+  if dragged?
+    [anchor, focus] = dragged
+    dragged = null
+    setSelection anchor, focus, false
   pointer = null
+  hideLoupe()
   pagesElm.classList.remove "sliding"
-  renderFormatMenu()
+  renderSelection()
 
 # Mobile browsers follow a tap with a pretend mousedown that would pull focus off the page — stop it
 pagesElm.addEventListener "mousedown", (e)->
-  e.preventDefault() if e.target.closest(".page")
-
-pagesElm.addEventListener "pointercancel", ()->
-  pointer = null
-  pagesElm.classList.remove "sliding"
+  e.preventDefault() if e.target.closest(".page, .handle")
 
 window.addEventListener "resize", ()-> render()
 
