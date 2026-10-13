@@ -1225,6 +1225,11 @@ rawAtIn = (d, k)->
   r-- while r > 0 and d.kinds[r - 1] in ["open", "blockClose", "escape", "delimiter"]
   r
 rawAt = (k)-> rawAtIn doc, k
+
+# The style a character typed at the caret takes on: whatever spans the Markdown around it puts it in
+styleAtCaret = ()->
+  r = input.selectionStart
+  decodeStyle parseMarkdown(input.value.slice(0, r) + "x" + input.value.slice(r)).styles[visAt r]
 visAt = (r)-> doc.visBefore[clamp r, 0, doc.raw.length]
 
 # The selection, in printed characters
@@ -1303,10 +1308,11 @@ tableStructureIn = (a, b)->
       keepCodes += styles[x]
   [keep, keepCodes]
 
-typeText = (str)->
+# base: the style of what's typed at a caret (plain, unless it's given)
+typeText = (str, base = {})->
   [a, b] = selected()
   {text} = doc
-  style = if a < b then decodeStyle doc.styles[a] else {}
+  style = if a < b then decodeStyle doc.styles[a] else base
   Object.assign style, alignStyle alignAt text, doc.styles, a
   if inTable a
     # Typing in a table: the row's flags come along, and Return breaks the line inside the cell — except at the end
@@ -1391,32 +1397,21 @@ input.addEventListener "beforeinput", (e)->
     e.preventDefault()
     deleteFor t
 
-# Pasting over a selection replaces it in one step, so one undo takes it back. Plain text takes on the style of what
-# it replaces, like typing over it; pasted Markdown keeps its own. (The paste event is the one that reliably carries
-# the clipboard's text.)
+# Pasting goes through the paragraph rewriter, like any edit that could split or join a span, so what's pasted and the
+# Markdown around it can't run together: ==Continued== pasted after ==Note== would otherwise read ==Note====Continued==,
+# and neither would be red. Plain text takes on the style of what it replaces, like typing over it, or at a caret, the
+# style typing there would get; pasted Markdown keeps its own. One undo takes a paste back. (The paste event is the one
+# that reliably carries the clipboard's text.)
 pasteText = (pasted)->
+  pasted = pasted.replace /\r\n?/g, "\n"
   [a, b] = selected()
-  return insertText pasted unless a < b
-  return typeText pasted if parseMarkdown(pasted).text.length is pasted.length
-  {text, styles} = doc
-  [keep, keepCodes] = tableStructureIn a, b
-  start = paragraphStart text, a
-  end = paragraphEnd text, b
-  newEnd = end - (b - a) + keep.length
-  codes = (styles.slice(0, a) + keepCodes + styles.slice(b)).slice start, newEnd + (if end is text.length then 1 else 0)
-  md = serializeBlock (text.slice(0, a) + keep + text.slice(b)).slice(start, newEnd), codes
-  at = rawAtIn parseMarkdown(md), a - start
-  rawStart = if start is 0 then 0 else doc.rawOf[start - 1] + 1
-  rawEnd = if end is text.length then doc.raw.length else doc.rawOf[end - 1] + 1
-  replaceRaw rawStart, rawEnd, md.slice(0, at) + pasted + md.slice(at)
-  caret = rawStart + at + pasted.length
-  input.setSelectionRange caret, caret
-  renderSelection()
-  followCaret()
+  parsed = parseMarkdown pasted
+  if parsed.text.length is pasted.length
+    typeText pasted, (if a is b then styleAtCaret())
+  else
+    edit a, b, parsed.text, parsed.styles.slice 0, parsed.text.length
 
 input.addEventListener "paste", (e)->
-  [a, b] = selected()
-  return unless a < b # Into a caret, the textarea takes it as it is
   e.preventDefault()
   pasteText e.clipboardData?.getData("text/plain") ? ""
 
