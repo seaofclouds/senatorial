@@ -9,6 +9,13 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
   far in it is from its own edge — drag them. Click a tab's link to tie it to the opposite margin, so the two mirror each other.
 - Click the strip above the sheet to set a tab stop; drag one away to clear it. The mark in the middle is the sheet's centre.
 - On a phone, swipe sideways to slide the sheet.
+- On a touch screen, selecting goes the way iOS has it:
+  - Double tap a word or triple tap a line. Keep holding after the last tap to drag the selection out a word (or line) at a time.
+  - Drag the handles at either end of a selection. Near the top, bottom, or sides of the screen the page scrolls along.
+  - Touch and hold to drag the caret.
+  - Tap the caret for Select, Select All, and Paste.
+  - A selection's menu has Cut, Copy, Paste, and Select All above the ways to strike it.
+  - A loupe shows the type under your finger while you drag.
 - Select text to restrike it light, double struck, in red, in capitals, underlined, struck through, or X'd out — each
   done the typist's way, by striking another key over the letters. The alignment lever sets the paragraph you're in flush left, centred, or flush right.
 - The margin tabs, tab stops, and line space lever stay hidden until you point at the strip above a sheet or the margin

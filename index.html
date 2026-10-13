@@ -65,6 +65,9 @@
     background: white;
     box-shadow: 0 .5px 1px #0001;
     cursor: text;
+    -webkit-touch-callout: none; /* touching and holding moves the caret, rather than offering to save the picture */
+    user-select: none;
+    -webkit-user-select: none;
     canvas { display: block; width: 100%; height: 100%; }
   }
 
@@ -93,9 +96,40 @@
     scroll-margin: 2em 0 10em;
     animation: blink 1.1s steps(1) infinite;
     body:not(.focused) & { opacity: 0; animation: none; }
+    &.under-handles { visibility: hidden; }
   }
 
   @keyframes blink { 50% { opacity: 0; } }
+
+  /* On a touch screen, a selection has a grab handle at each end, the way iOS does: a bar the height of the line, with
+     a knob on top at the start and underneath at the end. Each is a finger-sized target around what's drawn. */
+  .handle {
+    position: absolute;
+    z-index: 1;
+    width: 40px;
+    margin-left: -20px;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
+    &::before, &::after { content: ""; position: absolute; left: 19px; background: var(--caret); }
+    &::before { width: 2px; }
+    &::after { width: 11px; height: 11px; margin-left: -4.5px; border-radius: 50%; }
+    &.start::before { top: 20px; bottom: 0; }
+    &.start::after { top: 10px; }
+    &.end::before { top: 0; bottom: 20px; }
+    &.end::after { bottom: 10px; }
+  }
+
+  /* While a handle or the caret is dragged, a loupe above the finger shows the type under it, magnified */
+  .loupe {
+    position: fixed;
+    z-index: 3;
+    border-radius: 999px;
+    background: white;
+    box-shadow: 0 0 0 .5px #0002, 0 4px 14px #0003;
+    pointer-events: none;
+  }
 
   /* The real input lives here, invisible, parked at the caret so IMEs and mobile keyboards behave */
   .input {
@@ -297,6 +331,7 @@
     background: var(--body);
     box-shadow: 0 4px 14px #0003;
     white-space: nowrap;
+    width: max-content; /* its own width, wherever it's put, so it can be measured to keep it on screen */
     max-width: calc(100vw - 32px);
 
     /* How it's struck on the first row, with the ribbon colour at the end; what's struck over it on the second,
@@ -306,6 +341,18 @@
 
     button { font-size: .9rem; }
     .lever button { height: 1.35rem; }
+
+    /* Cut, Copy, Paste & Select All, the way a touch screen's own menu has them (a keyboard has its own) */
+    .edit { display: none; }
+    &.touch .edit { display: flex; }
+    .edit > :last-child { margin-left: 0; }
+    [data-edit=select] { display: none; }
+    /* Over the caret, just what can be done there */
+    &.at-caret {
+      .row:not(.edit), [data-edit=cut], [data-edit=copy] { display: none; }
+      [data-edit=select] { display: inline-block; }
+    }
+    &.all [data-edit=all] { display: none; }
     .light { font-weight: 300; }
     .double { font-weight: 700; }
     .caps { letter-spacing: .06em; text-transform: uppercase; font-size: .8rem; }
@@ -607,6 +654,13 @@
     <div class="selection"></div>
     <div class="caret"></div>
     <div class="format" hidden>
+      <div class="row edit">
+        <button data-edit="cut">Cut</button>
+        <button data-edit="copy">Copy</button>
+        <button data-edit="paste">Paste</button>
+        <button data-edit="select">Select</button>
+        <button data-edit="all">Select All</button>
+      </div>
       <div class="row">
         <button data-weight="regular">Regular</button>
         <button data-weight="light" class="light">Light</button>
@@ -620,6 +674,8 @@
         <button data-toggle="xout" class="xout" title="X out — an X struck over each letter">X-out</button>
       </div>
     </div>
+    <div class="handle start" hidden></div>
+    <div class="handle end" hidden></div>
     <textarea class="input" autofocus spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
   </div>
   <div class="ui">
@@ -650,6 +706,8 @@
   <p>Click a character to type it. Each can also be written by its name, as shown when you point at it.</p>
   <div class="keys"></div>
 </div>
+
+<canvas class="loupe" hidden></canvas>
 
 <div class="print"></div>
 

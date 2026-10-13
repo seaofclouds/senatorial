@@ -885,6 +885,8 @@ caretElm = $ ".caret"
 input = $ ".input"
 deckElm = $ ".ui"
 formatMenu = $ ".format"
+handles = start: $(".handle.start"), end: $(".handle.end")
+loupe = $ ".loupe"
 
 # A page's link (/s/<id>) has the page built into it, as the server has it
 shared = window.sharedPage
@@ -1150,8 +1152,28 @@ renderSelection = ()->
       x1 = if last + 1 <= ln.end then caretPoint(last + 1).x else caretPoint(last).x + pxPerInch / charactersPerInch
       rects.push "<div style='left:#{p0.x}px;top:#{p0.y}px;width:#{Math.max 2, x1 - p0.x}px;height:#{p0.h}px'></div>"
   selectionElm.innerHTML = rects.join ""
+  renderHandles a, b
   renderFormatMenu()
   syncAlign()
+
+# Where a selection ending before b is drawn to: just after its last character, on that character's line
+selectionEndPoint = (b)->
+  last = Math.max 0, b - 1
+  ln = layout.lines[lineIndexOf last]
+  p = caretPoint last
+  x: (if last + 1 <= ln.end then caretPoint(last + 1).x else p.x + pxPerInch / charactersPerInch), y: p.y, h: p.h
+
+# On a touch screen, a selection has a handle at each end to drag it by, the way iOS does
+touchScreen = false # whether the page was last reached for with a finger
+renderHandles = (a, b)->
+  show = a < b and touchScreen and document.activeElement is input and not viewing
+  handles.start.hidden = handles.end.hidden = not show
+  caretElm.classList.toggle "under-handles", show # the handles show where the selection ends, as the caret would
+  return unless show
+  s = caretPoint a
+  e = selectionEndPoint b
+  Object.assign handles.start.style, left: s.x + "px", top: s.y - 20 + "px", height: s.h + 20 + "px"
+  Object.assign handles.end.style, left: e.x + "px", top: e.y + "px", height: e.h + 20 + "px"
 
 # When the sheet is wider than the screen, it slides side to side like a carriage. Typing brings the strike
 # point to the middle; clicking, tapping, and selecting leave the sheet where it is, so you can aim at it.
@@ -1361,11 +1383,9 @@ input.addEventListener "beforeinput", (e)->
 # Pasting over a selection replaces it in one step, so one undo takes it back. Plain text takes on the style of what
 # it replaces, like typing over it; pasted Markdown keeps its own. (The paste event is the one that reliably carries
 # the clipboard's text.)
-input.addEventListener "paste", (e)->
+pasteText = (pasted)->
   [a, b] = selected()
-  return unless a < b
-  pasted = e.clipboardData?.getData("text/plain") ? ""
-  e.preventDefault()
+  return insertText pasted unless a < b
   return typeText pasted if parseMarkdown(pasted).text.length is pasted.length
   {text, styles} = doc
   [keep, keepCodes] = tableStructureIn a, b
@@ -1383,12 +1403,19 @@ input.addEventListener "paste", (e)->
   renderSelection()
   followCaret()
 
+input.addEventListener "paste", (e)->
+  [a, b] = selected()
+  return unless a < b # Into a caret, the textarea takes it as it is
+  e.preventDefault()
+  pasteText e.clipboardData?.getData("text/plain") ? ""
+
 # Copy and cut write well-formed Markdown, even when the selection starts or ends inside a span
+markdownOf = (a, b)-> serializeBlock doc.text.slice(a, b), doc.styles.slice(a, b) + encodeStyle {}
 copyMarkdown = (e)->
   [a, b] = selected()
   return false unless a < b
   e.preventDefault()
-  e.clipboardData.setData "text/plain", serializeBlock doc.text.slice(a, b), doc.styles.slice(a, b) + encodeStyle {}
+  e.clipboardData.setData "text/plain", markdownOf a, b
   true
 input.addEventListener "copy", copyMarkdown
 input.addEventListener "cut", (e)->
@@ -1515,11 +1542,21 @@ tabToCell = (back)->
         edit e, e, row, styles[e] + boundCodes, select: [e + 1, e + 1], endPatch: {header: false}
 
 # A little menu that pops up over a selection, for striking it differently
+# On a touch screen it also has Cut, Copy, Paste & Select All, and tapping the caret brings up what can be done there.
+caretMenuAt = null # where the caret was tapped for its menu
+menuPutAway = null # the selection the menu was put away from, after copying it
 renderFormatMenu = ()->
   [a, b] = selected()
-  show = a < b and not pointer? and document.activeElement is input and not viewing
+  atCaret = a is b and a is caretMenuAt and touchScreen
+  show = (a < b or atCaret) and not pointer? and document.activeElement is input and not viewing and
+    menuPutAway isnt "#{a} #{b}"
   formatMenu.hidden = not show
   return unless show
+  formatMenu.classList.toggle "touch", touchScreen
+  formatMenu.classList.toggle "at-caret", atCaret
+  formatMenu.classList.toggle "all", a is 0 and b is layout.n
+  placeFormatMenu a, b
+  return if atCaret
 
   # Line breaks, cell breaks, and the spaces at the ends of lines never carry a span (Markdown has nowhere to put it),
   # so only the printed letters count when showing whether the selection is already struck that way
@@ -1532,6 +1569,7 @@ renderFormatMenu = ()->
     btn.classList.toggle "active", sel.every (style)-> style[btn.dataset.toggle]
   formatMenu.querySelector("[data-caps]").classList.toggle "active", isCaps doc.text.slice a, b
 
+placeFormatMenu = (a, b)->
   first = caretPoint a
   menuH = formatMenu.offsetHeight
   pageTop = pageViews[layout.pos[a][0]].elm.offsetTop
@@ -1542,6 +1580,26 @@ renderFormatMenu = ()->
 
 for btn in formatMenu.querySelectorAll ".row > button"
   btn.addEventListener "pointerdown", (e)-> e.preventDefault() # Keep the selection while choosing
+
+editActions =
+  cut: ()->
+    [a, b] = selected()
+    return if document.execCommand "cut" # goes through the textarea's own cut, as Markdown
+    navigator.clipboard?.writeText(markdownOf a, b).then ()-> edit a, b, "", ""
+  copy: ()->
+    [a, b] = selected()
+    navigator.clipboard?.writeText markdownOf a, b unless document.execCommand "copy"
+    menuPutAway = "#{a} #{b}"
+    renderFormatMenu()
+  paste: ()-> navigator.clipboard?.readText().then (text)-> pasteText text if text
+  select: ()-> setSelection expand(focusIndex(), 2)..., false
+  all: ()-> setSelection 0, layout.n, false
+for btn in formatMenu.querySelectorAll "[data-edit]"
+  do (btn)-> btn.onclick = ()->
+    caretMenuAt = null
+    editActions[btn.dataset.edit]()
+
+for btn in formatMenu.querySelectorAll ".row:not(.edit) > button"
   do (btn)-> btn.onclick = ()->
     if btn.dataset.weight?
       # Light & double struck turn back to regular when pressed again
@@ -2016,6 +2074,7 @@ moveToLineEdge = (end, extend)->
 isMac = /Mac|iPhone|iPad/.test navigator.platform
 
 input.addEventListener "keydown", (e)->
+  caretMenuAt = null
   return if e.isComposing or e.keyCode is 229 # keys that are part of an accent or input method go to it
   mod = if isMac then e.metaKey else e.ctrlKey
   verticalKey = e.key in ["ArrowUp", "ArrowDown", "PageUp", "PageDown"]
@@ -2056,6 +2115,7 @@ input.addEventListener "keydown", (e)->
       followCaret()
 
 input.addEventListener "input", (e)->
+  caretMenuAt = null
   reparse()
   saveText()
   syncTitle()
@@ -2077,7 +2137,9 @@ for type in ["select", "selectionchange", "keyup"]
 document.addEventListener "selectionchange", ()->
   renderSelection() if document.activeElement is input
 
-updateFocus = ()-> document.body.classList.toggle "focused", document.activeElement is input
+updateFocus = ()->
+  document.body.classList.toggle "focused", document.activeElement is input
+  renderHandles selected()... if layout? and pageViews.length
 input.addEventListener "focus", updateFocus
 input.addEventListener "blur", ()->
   updateFocus()
@@ -2125,14 +2187,29 @@ clickCount = (e)->
   lastClick = time: e.timeStamp, x: e.clientX, y: e.clientY, count: if near and quick then lastClick.count % 3 + 1 else 1
   lastClick.count
 
+# On a touch screen, things go the way iOS has them: a tap places the carriage (and a tap on the caret brings up its
+# menu), touching and holding drags the caret, a double tap selects a word and a triple tap a line, holding after one
+# drags the selection out a word (or line) at a time, and a selection's handles drag either end. A sideways swipe
+# slides the sheet, and an up-down one scrolls.
 pagesElm.addEventListener "pointerdown", (e)->
   return unless e.target.closest ".page"
   return if e.target.closest ".strip, .vstop, .lever"
   return if e.button isnt 0
+  touchScreen = e.pointerType is "touch"
+  menuPutAway = null
 
-  # On touch screens, a tap places the carriage, a sideways swipe slides the sheet, and an up-down drag scrolls
   if e.pointerType is "touch"
-    pointer = touch: true, x: e.clientX, y: e.clientY, tx: carriageX, sliding: false
+    focused = document.activeElement is input
+    pointer = touch: true, x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, tx: carriageX, sliding: false,
+    count: clickCount(e), was: (if focused then selected() else null)
+    if pointer.count >= 2
+      input.focus preventScroll: true
+      caretMenuAt = goalCol = null
+      [a, b] = expand hitTest(e), pointer.count
+      setSelection a, b, false
+      pointer.span = [a, b]
+    else
+      pointer.hold = setTimeout holdCaret, 500
     return
 
   e.preventDefault()
@@ -2151,10 +2228,152 @@ pagesElm.addEventListener "pointerdown", (e)->
     pointer = {anchor}
   pagesElm.setPointerCapture e.pointerId
 
+# Touching and holding still picks up the caret, to drag where it's wanted
+holdCaret = ()->
+  return unless pointer?.touch and not pointer.sliding
+  pointer.caret = true
+  input.focus preventScroll: true
+  caretMenuAt = goalCol = null
+  dragSelection()
+
+for which, handle of handles
+  do (which, handle)->
+    handle.addEventListener "pointerdown", (e)->
+      e.preventDefault()
+      touchScreen = e.pointerType is "touch"
+      [a, b] = selected()
+      # Where the handle's end of the selection is, so the finger moves it from wherever it took hold
+      at = if which is "start" then caretPoint a else selectionEndPoint b
+      box = pagesElm.getBoundingClientRect()
+      pointer = cx: e.clientX, cy: e.clientY, handle:
+        which: which, fixed: (if which is "start" then b else a)
+        dx: box.left + at.x - e.clientX, dy: box.top + at.y + at.h / 2 - e.clientY
+      handle.setPointerCapture e.pointerId
+      renderFormatMenu()
+    # Keep the keyboard up, and the selection with it
+    handle.addEventListener "touchstart", ((e)-> e.preventDefault()), passive: false
+
+# Move whichever end of the selection is being dragged to where the finger is
+dragSelection = ()->
+  return unless pointer?
+  {cx, cy} = pointer
+  if pointer.handle?
+    {which, fixed, dx, dy} = pointer.handle
+    i = hitTest clientX: cx + dx, clientY: cy + dy
+    # Like iOS, the handles don't cross: there's always at least a character between them
+    if which is "start"
+      i = Math.min i, fixed - 1
+      setSelection fixed, i, false
+      showLoupe caretPoint i
+    else
+      i = Math.max i, fixed + 1
+      setSelection fixed, i, false
+      showLoupe selectionEndPoint Math.min i, layout.n
+  else if pointer.caret
+    i = hitTest clientX: cx, clientY: cy
+    setSelection i, i, false
+    showLoupe caretPoint i
+  else if pointer.span?
+    [a, b] = pointer.span
+    [s, t] = expand hitTest(clientX: cx, clientY: cy), pointer.count
+    if s < a
+      setSelection b, s, false
+      showLoupe caretPoint s
+    else
+      setSelection a, Math.max(b, t), false
+      showLoupe selectionEndPoint Math.max b, t
+
+dragging = ()-> pointer? and (pointer.handle? or pointer.caret or pointer.span?)
+
+# Dragged to the top of the screen, or down to the machine, the page scrolls to take the selection further; dragged
+# to either side, the sheet slides along like the carriage
+scrollWhileDragging = ()->
+  speeds = ()->
+    return [0, 0] unless dragging()
+    edge = (by_)-> Math.min 20, 2 + by_ / 3
+    top = 48
+    bottom = deckElm.getBoundingClientRect().top - 24
+    side = 32
+    vx = if pointer.cx < side then -edge(side - pointer.cx)
+    else if pointer.cx > innerWidth - side then edge(pointer.cx - innerWidth + side)
+    else 0
+    vy = if pointer.cy < top then -edge(top - pointer.cy) else if pointer.cy > bottom then edge(pointer.cy - bottom) else 0
+    [vx, vy]
+  return if pointer.scrolling or speeds().every (v)-> v is 0
+  pointer.scrolling = true
+  pagesElm.classList.add "sliding"
+  step = ()->
+    [vx, vy] = speeds()
+    if vx is 0 and vy is 0
+      pointer?.scrolling = false
+      return
+    window.scrollBy 0, vy
+    slideCarriage carriageX - vx if vx
+    dragSelection()
+    requestAnimationFrame step
+  requestAnimationFrame step
+
+# The loupe: the type around a point on the pages (where the caret or a handle is), magnified, above the finger
+loupeW = 132
+loupeH = 48
+loupeZoom = 1.75
+showLoupe = (pt)->
+  view = null
+  view = v for v in pageViews when v.elm.offsetTop <= pt.y
+  return hideLoupe() unless view?
+  dpr = window.devicePixelRatio or 1
+  unless loupe.width is Math.round loupeW * dpr
+    loupe.width = Math.round loupeW * dpr
+    loupe.height = Math.round loupeH * dpr
+    Object.assign loupe.style, width: loupeW + "px", height: loupeH + "px"
+  ctx = loupe.getContext "2d"
+  ctx.setTransform dpr, 0, 0, dpr, 0, 0
+  ctx.fillStyle = getComputedStyle(document.body).backgroundColor
+  ctx.fillRect 0, 0, loupeW, loupeH
+  # What's in view, in CSS px on the .pages container
+  sw = loupeW / loupeZoom
+  sh = loupeH / loupeZoom
+  sx = pt.x - sw / 2
+  sy = pt.y + pt.h / 2 - sh / 2
+  k = view.canvas.width / view.elm.offsetWidth
+  ox = view.elm.offsetLeft
+  oy = view.elm.offsetTop
+  # Safari draws nothing if the source reaches past the edge of the canvas, so take only what's on it
+  x0 = Math.max sx, ox
+  y0 = Math.max sy, oy
+  x1 = Math.min sx + sw, ox + view.elm.offsetWidth
+  y1 = Math.min sy + sh, oy + view.elm.offsetHeight
+  if x1 > x0 and y1 > y0
+    ctx.drawImage view.canvas, (x0 - ox) * k, (y0 - oy) * k, (x1 - x0) * k, (y1 - y0) * k,
+      (x0 - sx) * loupeZoom, (y0 - sy) * loupeZoom, (x1 - x0) * loupeZoom, (y1 - y0) * loupeZoom
+  # The selection, and the caret or handle
+  ctx.fillStyle = "hsla(30, 5%, 30%, .18)"
+  for r in selectionElm.children
+    ctx.fillRect (r.offsetLeft - sx) * loupeZoom, (r.offsetTop - sy) * loupeZoom,
+      r.offsetWidth * loupeZoom, r.offsetHeight * loupeZoom
+  ctx.fillStyle = getComputedStyle(caretElm).backgroundColor
+  ctx.fillRect (pt.x - sx) * loupeZoom - 1, (pt.y - sy) * loupeZoom, 2, pt.h * loupeZoom
+  # Above the line, clear of the finger, and on screen
+  box = pagesElm.getBoundingClientRect()
+  left = clamp box.left + pt.x - loupeW / 2, 8, innerWidth - loupeW - 8
+  top = Math.max 8, box.top + pt.y - loupeH - 28
+  Object.assign loupe.style, left: left + "px", top: top + "px"
+  loupe.hidden = false
+
+hideLoupe = ()-> loupe.hidden = true
+
 pagesElm.addEventListener "pointermove", (e)->
   return unless pointer?
-  if pointer.touch
+  if dragging()
+    pointer.cx = e.clientX
+    pointer.cy = e.clientY
+    dragSelection()
+    scrollWhileDragging()
+  else if pointer.touch
     dx = e.clientX - pointer.x
+    if Math.hypot(dx, e.clientY - pointer.y) > 10
+      clearTimeout pointer.hold
+      pointer.moved = true
     if not pointer.sliding and Math.abs(dx) > 8 and Math.abs(dx) > Math.abs(e.clientY - pointer.y)
       pointer.sliding = true
       pagesElm.classList.add "sliding"
@@ -2162,25 +2381,40 @@ pagesElm.addEventListener "pointermove", (e)->
   else
     setSelection pointer.anchor, hitTest(e), false
 
+# Once the caret or the selection is being dragged, the finger's moves are for it, not for scrolling
+pagesElm.addEventListener "touchmove", ((e)-> e.preventDefault() if dragging()), passive: false
+
 pagesElm.addEventListener "pointerup", (e)->
-  if pointer?.touch and not pointer.sliding and Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) < 10
-    pointer = null
+  return unless pointer?
+  clearTimeout pointer.hold
+  if dragging()
+    input.focus preventScroll: true
+  else if pointer.touch and not pointer.sliding and not pointer.moved
     input.focus preventScroll: true
     goalCol = null
     i = hitTest e
-    count = clickCount e
-    if count >= 2 then setSelection expand(i, count)..., false else setSelection i, i, false
+    # A tap on the caret brings up its menu, and another puts it away; anywhere else moves the caret there
+    [a, b] = pointer.was ? [-1, -1]
+    if a is b is i
+      caretMenuAt = if caretMenuAt is i then null else i
+    else
+      caretMenuAt = null
+      setSelection i, i, false
+  endPointer()
+
+pagesElm.addEventListener "pointercancel", ()->
+  clearTimeout pointer?.hold
+  endPointer()
+
+endPointer = ()->
   pointer = null
+  hideLoupe()
   pagesElm.classList.remove "sliding"
-  renderFormatMenu()
+  renderSelection()
 
 # Mobile browsers follow a tap with a pretend mousedown that would pull focus off the page — stop it
 pagesElm.addEventListener "mousedown", (e)->
-  e.preventDefault() if e.target.closest(".page")
-
-pagesElm.addEventListener "pointercancel", ()->
-  pointer = null
-  pagesElm.classList.remove "sliding"
+  e.preventDefault() if e.target.closest(".page, .handle")
 
 window.addEventListener "resize", ()-> render()
 
