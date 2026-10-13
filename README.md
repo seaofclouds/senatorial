@@ -70,13 +70,25 @@ changes when they come back to it), and their Edit key makes them a copy of thei
 
 Only the browser a page was made in can change it: it keeps the page's key, and the server keeps just a hash of it.
 
-## Adding glyphs
+## Glyphs
 
-`docs/character-sheet.pdf` and `docs/character-sheet-red.pdf` lay out every character Senatorial is meant to have, at
-true size, in each strike: the typewriter's own glyphs, cut from the scans in `glyphs/`, and a blank wherever one still
-needs drawing. Accents are drawn once each, over a capital and over a lowercase letter, in a blank beside a typed letter
-to line them up against, then laid over the typed letters. Print one at actual size, draw in the gaps, and scan it back
-in. `python3 docs/character-sheet.py` rebuilds them. A character the scans don't have yet types as a blank space.
+Every strike (light, regular and double struck, in black and in red) has one image in `glyphs/`, with the glyphs set
+out in a grid in the order `glyphs/layout.json` lists them, at 600 dpi. A character the images don't have types as a
+blank space.
+
+They're built by `python3 docs/build-glyphs.py`, from two sources in `scans/`:
+
+- `scans/typed/`: the typewriter's own scans, at 1200 dpi.
+- `scans/character-sheet-black.png` and `scans/character-sheet-red.png`: the filled-in character sheets, with
+  everything the typewriter doesn't have drawn by hand.
+
+`docs/character-sheet.pdf` and `docs/character-sheet-red.pdf` are those sheets, blank (`python3 docs/character-sheet.py`
+rebuilds them). They lay out every character at true size in each strike: the typed glyphs, and a blank for each one to
+draw. Accents are drawn once each, over a capital and over a lowercase letter, after a typed letter to line them up
+against. To add or redraw glyphs, print a sheet at actual size, draw in the blanks, scan it at 1200 dpi into `scans/`,
+and run the build. It lines the scan up against the typed glyphs, cuts out each drawing, and sets it at the height its
+kind of character sits at (on the baseline, raised, centred, or hanging below), centred across its cell. Then it lays
+each accent over every letter that takes it.
 
 ## Running it
 

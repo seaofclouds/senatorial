@@ -3,7 +3,7 @@
 # Everything is measured in real-world inches, so pages come out at their true physical size
 charactersPerInch = 11 # this is based on the actual typewriter
 linesPerInch = 6 # standard typewriter line feed — single spacing is 1/6"
-atlasDPI = 1200 # ROUGHLY — this is based on the glyph scan Todd sent me
+atlasDPI = 600 # the glyph images' resolution (glyphs/layout.json)
 exportDPI = 600 # Resolution of saved & printed pages. Change it to whatever you want, and everything Just Works™
 
 # PAPER ###########################################################################################
@@ -86,13 +86,9 @@ defaultTabs = (g)-> (c for c in [g.left + defaultTabInterval...g.right] by defau
 
 # ATLAS ###########################################################################################
 
-# We assume that the provided glyph images will be an atlas of characters arranged in this pattern
-# We also assume that the characters in this atlas have a single space between them
-atlasLayout = "!\"#$%_&'()*+ 1234567890-= QWERTYUIOP¼ qwertyuiop½ ASDFGHJKL:@ asdfghjkl;¢ ZXCVBNM,.? zxcvbnm,./".split /\s/
-
-# Top left corner in atlas — just eyeball it
-sx = 75
-sy = 110
+# Each strike & ribbon colour has an image of every glyph, set out in a grid of cells in the order glyphs/layout.json
+# lists them. docs/build-glyphs.py makes them, from the typewriter's own scans and the hand-drawn character sheets.
+atlas = null # glyphs/layout.json, once it's loaded
 
 # Size of glyphs in the atlas
 gw = atlasDPI / charactersPerInch
@@ -101,26 +97,19 @@ gh = atlasDPI / 8
 # Shift the glyph down within its line so it sits nicely under the caret
 verticalAlign = gh * .15
 
-# How much extra space around the glyph should we include when copying the glyph from the atlas to the canvas?
-# When this is zero, glyphs sometimes get cut off. If it's too big, you'll see bits of neighbouring glyphs.
-pad = gw * 0.4
-
-# The atlases are slightly rotated, so this tries to compensate
-skew = 1.3
+# How much room around a glyph to copy with it from the atlas to the canvas: across, enough that nothing gets cut off;
+# up and down, enough for an accent over a capital or a tail under the line
+padX = gw * 0.4
+padY = gh * 2 / 3
 
 # Typographer's punctuation that the typewriter doesn't have, mapped to the keys you'd actually strike (until the atlas has its own)
 substitutions = "‘": "'", "’": "'", "“": "\"", "”": "\"", "–": "-", "—": "-", "×": "x"
 
-# This function returns the x,y pixel position within the atlas for a given character, or null if the character isn't in the atlas.
-# The characters in the atlas have a single space between them, and the lines are double-spaced, so we multiply positions by 2 in both directions.
+# The x,y pixel position within the atlas of a character's glyph, or nulls if the atlas doesn't have it
 getGlyphPosInAtlas = (c)->
-  for row, y in atlasLayout
-    x = row.indexOf c
-    if x isnt -1
-      px = sx + (2 * x * gw)
-      py = sy + (2 * y * gh) - x * skew # Compensate for the atlases being slightly tilted
-      return [px, py]
-  [null, null]
+  i = atlas?.index.get c
+  return [null, null] unless i?
+  [(i % atlas.columns) * atlas.cellWidth + atlas.glyphX, Math.floor(i / atlas.columns) * atlas.cellHeight + atlas.glyphY]
 
 glyphCache = {}
 glyph = (c)->
@@ -131,22 +120,25 @@ glyph = (c)->
 
 # These images store the glyph atlases, one per strike & ribbon colour
 atlases = {}
-atlasNames = ["regular", "light", "double", "regular-red", "light-red"]
+atlasNames = ["regular", "light", "double", "regular-red", "light-red", "double-red"]
 
-atlasFor = (style)->
-  name = style.weight + (if style.red then "-red" else "")
-  name = "regular-red" if name is "double-red" # There's no red double struck scan
-  atlases[name]
+atlasFor = (style)-> atlases[style.weight + (if style.red then "-red" else "")]
 
 loadAtlases = ()->
   loaded = 0
+  done = ()-> document.body.classList.add "ready" if ++loaded is atlasNames.length + 1
+  fetch("glyphs/layout.json").then((r)-> r.json()).then (layout)->
+    atlas = Object.assign layout, index: new Map Array.from(layout.chars).map (c, i)-> [c, i]
+    glyphCache = {}
+    invalidate()
+    done()
   for name in atlasNames
     do (name)->
       img = new Image()
       img.onload = ()->
         atlases[name] = img
         invalidate()
-        document.body.classList.add "ready" if ++loaded is atlasNames.length
+        done()
       img.src = "glyphs/#{name}.png"
 
 # STYLE ###########################################################################################
@@ -1005,7 +997,7 @@ drawPage = (ctx, p, ppi)->
   strike = (img, c, px, py)->
     [gx, gy] = glyph c
     return unless gx? # A key the machine doesn't have strikes nothing, leaving a blank space
-    ctx.drawImage img, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
+    ctx.drawImage img, gx - padX, gy - padY, gw + padX*2, gh + padY*2, px - padX, py - padY, gw + padX*2, gh + padY*2
 
   # Where a line wraps in the middle of an underlined (or struck through, or X'd out) phrase, the typist stops at the
   # last letter on the line and starts again at the first one on the next: the spaces around the wrap go bare
