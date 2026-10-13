@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # Builds docs/character-sheet.pdf: every character Senatorial should have, on one US Letter sheet, in light, regular
-# and double struck, and docs/character-sheet-red.pdf, the same in the red half of the ribbon. Characters the typewriter already has are cut straight from the scans in glyphs/ at true size;
-# accented letters show their bare letter, to draw the accent over; anything else is left blank, to draw in.
-# Each one is labelled underneath in grey, with clear space between, and the baseline is ticked in non-photo blue.
+# and double struck, and docs/character-sheet-red.pdf, the same in the red half of the ribbon. Characters the
+# typewriter already has are cut straight from the scans in glyphs/ at true size; anything else is left blank, to draw
+# in. Accents are drawn once each, for capitals and for lowercase, beside a typed letter to line them up against, and
+# laid over typed letters later. Each character is labelled underneath in grey, and framed by a tick either side,
+# alternately non-photo blue and green, at its baseline (or, for an accent, where the accent sits).
 #
 #   python3 docs/character-sheet.py [path/to/Inconsolata.ttf]
 #
 # Needs Pillow, and Node with Playwright to print the PDF.
 
-import base64, html, io, os, subprocess, sys, unicodedata
+import base64, html, io, os, subprocess, sys
 from PIL import Image
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,7 +32,7 @@ def atlasPos(c):
             return sx + 2 * x * gw, sy + 2 * y * gh - x * skew
     return None
 
-# Every character, roughly in the order you'd look for it
+# Every character, roughly in the order you'd look for it. Accented letters aren't here: see accents below.
 sheet = [
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "abcdefghijklmnopqrstuvwxyz",
@@ -38,20 +40,21 @@ sheet = [
     "`~!@#$%^&*()-_=+[]{}\\|;:'\",.<>/?",
     "¼½¢£€¥©®™°±×÷≠≈≤≥∞√∫∑∏∂∆Ωµπƒ◊¬¹²³¾",
     "‘’“”‚„‹›«»–—…·•¡¿§¶†‡‰ªº⁄¦¤",
-    "´¨ˆ˜¸˛˝ˇ¯˘˙˚",
-    "ÆæŒœØøÅåÇçßıÐðÞþ",
-    "ÀÁÂÄÃàáâäãÈÉÊËèéêëÌÍÎÏìíîïÒÓÔÖÕòóôöõÙÚÛÜùúûüÑñÝýŸÿ",
+    "˛˝ˇ¯˘˙",
+    "ÆæŒœßıÐðÞþ",
     "←→↑↓↖↗↘↙↰↱↲↳↶↷⤵↺↻",
     "‸✓✗★",
 ]
 chars = list(dict.fromkeys("".join(sheet)))
 
-# Letters the scans have without their accent (or slash, or ring), shown bare to draw the rest on
-bare = {"Ø": "O", "ø": "o"}
-def base(c):
-    if c in bare: return bare[c]
-    b = unicodedata.normalize("NFD", c)[0]
-    return b if b != c and b.isalpha() else None
+# Each accent is drawn once over a capital and once over a lowercase letter, in a blank beside the typed letter, and
+# laid over any letter that takes it (accented i's over the dotless ı). The ticks in the blank sit where the accent
+# does: just above the capitals or the lowercase, or on the baseline for the ones that hang below or cross the letter.
+capAccent, lowAccent = 143, 115 # pixels above the baseline in the scans, a little over the capitals and the x-height
+accents = [ # (typed letter, accented letter, how far above the baseline the accent sits)
+    *[("A", c, capAccent) for c in "ÀÁÂÄÃÅ"], ("C", "Ç", 0), ("O", "Ø", 0),
+    *[("a", c, lowAccent) for c in "àáâäãå"], ("c", "ç", 0), ("o", "ø", 0),
+]
 
 def crop(img, c):
     gx, gy = atlasPos(c)
@@ -61,19 +64,24 @@ def crop(img, c):
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 # Characters that come out tiny in any font, so their labels are set larger
-smallLabels = set("¹²³¼½¾ªº´¨ˆ˜¸˛˝ˇ¯˘˙˚·‚„‘’“”™")
+smallLabels = set("¹²³¼½¾ªº˛˝ˇ¯˘˙·‚„‘’“”™")
 
 inch = lambda px: f"{px / atlasDPI:.4f}in"
 columns = 32
 
+def cell(label, glyph="", lift=0):
+    small = " small" if label in smallLabels else ""
+    return (f'<div class="cell" style="--lift: {inch(lift)}"><div class="glyph">{glyph}</div>'
+            f'<div class="label{small}">{html.escape(label)}</div></div>')
+
 def section(title, atlas):
     img = Image.open(os.path.join(root, "glyphs", atlas + ".png"))
-    cells = []
-    for c in chars:
-        shown = c if atlasPos(c) else base(c)
-        glyph = f'<img src="{crop(img, shown)}">' if shown and atlasPos(shown) else ""
-        small = " small" if c in smallLabels else ""
-        cells.append(f'<div class="cell"><div class="glyph">{glyph}</div><div class="label{small}">{html.escape(c)}</div></div>')
+    typed = lambda c: f'<img src="{crop(img, c)}">' if atlasPos(c) else ""
+    cells = [cell(c, typed(c)) for c in chars]
+    # The accents start a row of their own, so each pair stays together
+    cells += ['<div class="cell gap"></div>'] * (-len(cells) % columns)
+    for letter, accented, lift in accents:
+        cells += [cell(letter, typed(letter)), cell(accented, lift=lift)]
     return f'<section><h2>{title}</h2><div class="grid">{"".join(cells)}</div></section>'
 
 font = sys.argv[1] if len(sys.argv) > 1 else None
@@ -89,17 +97,18 @@ main {{ width: 8.5in; height: 11in; padding: 0.35in 0.4in }}
 h1 {{ font-size: 10pt; font-weight: 600; margin: 0; letter-spacing: 0.04em }}
 h2 {{ font-size: 8pt; font-weight: 600; margin: 0.06in 0 0; letter-spacing: 0.04em }}
 .grid {{ display: grid; grid-template-columns: repeat({columns}, 0.24in) }}
-.cell {{ position: relative; height: 0.395in; display: flex; flex-direction: column; align-items: center }}
+.cell {{ position: relative; height: 0.455in; display: flex; flex-direction: column; align-items: center }}
 /* Room above the capitals for accents; the bottom edge is the baseline */
-.glyph {{ position: relative; width: {inch(gw)}; height: 0.21in; flex: none }}
+.glyph {{ position: relative; width: {inch(gw)}; height: 0.26in; flex: none }}
 .glyph img {{ position: absolute; left: {inch(-pad)}; bottom: {inch(baseline - gh - pad)}; width: {inch(gw + 2 * pad)};
   height: {inch(gh + 2 * pad)}; mix-blend-mode: multiply }}
-/* The baseline is marked by one short tick between each pair of characters (and at the ends of each row), in
-   non-photo blue, leaving the space to draw in clear */
-.cell::before, .cell:nth-child({columns}n)::after, .cell:last-child::after {{ content: ""; position: absolute;
-  top: calc(0.21in - 0.4pt); width: 0.02in; border-bottom: 0.4pt solid #a4dded }}
-.cell::before {{ left: -0.01in }} .cell::after {{ right: -0.01in }}
-/* Clear space under the baseline for descenders, then the label */
+/* A short tick either side frames each character at its baseline (or where its accent sits), alternately non-photo
+   blue and green so it's clear where one ends and the next begins, leaving the space to draw in clear */
+.cell:not(.gap) .glyph::before, .cell:not(.gap) .glyph::after {{ content: ""; position: absolute; bottom: var(--lift);
+  width: 0.018in; border-bottom: 0.4pt solid #a4dded }}
+.cell:nth-child(even) .glyph::before, .cell:nth-child(even) .glyph::after {{ border-color: #92d38b }}
+.glyph::before {{ left: -0.058in }} .glyph::after {{ right: -0.058in }}
+/* Clear space under the baseline for descenders, then the label, then room above the next row's accents */
 .label {{ font-size: 8.5pt; line-height: 0.11in; color: #666; margin-top: 0.075in }}
 .label.small {{ font-size: 11.5pt }}
 """
@@ -125,4 +134,4 @@ for file, title, weights in sheets:
     open(out + ".html", "w").write(page)
     subprocess.run(["node", "-e", printer, out + ".html", out + ".pdf"], check=True)
     os.remove(out + ".html")
-    print(f"{len(chars)} characters × {len(weights)} → {out}.pdf")
+    print(f"{len(chars)} characters and {len(accents)} accents × {len(weights)} → {out}.pdf")
