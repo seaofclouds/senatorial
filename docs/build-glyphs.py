@@ -177,7 +177,7 @@ def drawn(img, red=False, threshold=70, smallest=40):
 # WHERE EACH KIND OF CHARACTER SITS ###############################################################
 
 # Measured off the typed glyphs, in pixels at 1200 dpi down from the top of a glyph's cell in the typewriter's scans
-line = {"base": 126, "cap": -5, "x": 23, "axis": 74, "paren": 62, "comma": 85}
+line = {"base": 126, "cap": -5, "x": 23, "axis": 74, "paren": 62, "tail": 160}
 centre = 58 # across: the typed glyphs sit a little right of their cells' middle
 gap = 12    # between a letter and the accent over it
 
@@ -188,7 +188,7 @@ for chars, rule in [
     ("¹²³ª º°™‘’“”`^˝ˇ¯˘˙", ("top", "cap")),       # raised
     ("þƒ", ("top", "cap")),                        # tall, and hanging below the baseline
     ("µ¡¿", ("top", "x")),                         # x-height, and hanging below
-    ("‚„", ("top", "comma")),                      # low quotes, where a comma sits
+    ("‚„", ("bottom", "tail")),                    # low quotes, hanging as low as a comma's tail
     ("˛", ("top", "base")),                        # under the baseline
     ("×÷±≠≈–—~·•¬<>«»‹›∞←→≤≥¤", ("middle", "axis")),
     ("[]{}|\\¦∫⁄", ("middle", "paren")),
@@ -416,8 +416,9 @@ def build():
                     box = inkBox(canvas[oy - originY:oy - originY + cellH, ox - originX:ox - originX + cellW])
                     if box: accentBottom[a] = (box[3] - originY) * outDPI / atlasDPI
         img = Image.fromarray(canvas).resize((canvas.shape[1] * outDPI // atlasDPI, canvas.shape[0] * outDPI // atlasDPI), Image.LANCZOS)
-        # Black ink is saved as greys; red as a palette of 256 colours, plenty for red ink on white paper
-        img = img.quantize(256, dither=Image.Dither.NONE) if "red" in name else img.convert("L")
+        # Saved as a palette of 256 colours, plenty for one colour of ink on white paper, and keeping the tint of each
+        # pen's black (the gel pen's is a little blue) and the ribbon's
+        img = img.quantize(256, dither=Image.Dither.NONE)
         img.save(here("glyphs", name + ".png"), optimize=True)
         print(f"glyphs/{name}.png: {img.width} × {img.height}")
     s = outDPI / atlasDPI
