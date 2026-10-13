@@ -11,7 +11,7 @@
 
 import json, os, sys
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 Image.MAX_IMAGE_PIXELS = None
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -427,6 +427,9 @@ def build():
                     box = inkBox(canvas[oy - originY:oy - originY + cellH, ox - originX:ox - originX + cellW])
                     if box: accentBottom[a] = (box[3] - originY) * outDPI / atlasDPI
         img = Image.fromarray(canvas).resize((canvas.shape[1] * outDPI // atlasDPI, canvas.shape[0] * outDPI // atlasDPI), Image.LANCZOS)
+        # Sharpened a touch, for print: about a pixel's worth at the 600 dpi pages export at. Any more and the ribbon's
+        # weave turns gritty and the ink goes solid black.
+        img = img.filter(ImageFilter.UnsharpMask(radius=1.5, percent=40, threshold=3))
         # Saved as a palette of 256 colours, plenty for one colour of ink on white paper, and keeping the tint of each
         # pen's black (the gel pen's is a little blue) and the ribbon's
         img = img.quantize(256, dither=Image.Dither.NONE)
