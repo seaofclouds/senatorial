@@ -123,10 +123,12 @@ const { chromium } = require(require('child_process').execSync('npm root -g').to
   await b.close();
 })();"""
 
-# The red half of the ribbon was only scanned light and regular; the app strikes double struck red as regular
+# The red half of the ribbon was only scanned light and regular, so its double struck section shows the regular red
+# glyphs to draw against (which is how the app strikes double struck red, until it has its own)
 sheets = [
     ("character-sheet", "Character Sheet", [("Light", "light"), ("Regular", "regular"), ("Double struck", "double")]),
-    ("character-sheet-red", "Character Sheet Red", [("Light", "light-red"), ("Regular", "regular-red")]),
+    ("character-sheet-red", "Character Sheet Red",
+     [("Light", "light-red"), ("Regular", "regular-red"), ("Double struck", "regular-red")]),
 ]
 for file, title, weights in sheets:
     out = os.path.join(root, "docs", file)
