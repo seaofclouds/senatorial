@@ -133,12 +133,19 @@ def components(mask):
         found.append((np.array(ys), np.array(xs)))
     return found
 
+def ticks(rgb):
+    """Where the ticks printed either side of a blank are: pale blue or green, at its sides. Only the sides, since some
+    pens' black (the light gel pen's) scans a little blue, and the middle of a blank is all pen."""
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    sides = np.zeros(rgb.shape[1], bool)
+    sides[:round(rgb.shape[1] * 0.2)] = sides[-round(rgb.shape[1] * 0.2):] = True
+    return ((g - r > 18) | (b - r > 18)) & (r > 110) & sides
+
 def ink(img):
     """How much ink is at each pixel (0 for paper), ignoring the blue and green ticks printed on the sheet."""
     rgb = np.asarray(img, dtype=np.float32)
-    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
     amount = 255 - rgb.min(2)
-    amount[(g - r > 18) | (b - r > 18)] = 0
+    amount[ticks(rgb)] = 0
     return amount
 
 def drawn(img, red=False, threshold=70, smallest=40):
@@ -162,8 +169,7 @@ def drawn(img, red=False, threshold=70, smallest=40):
     grown = keep.copy()
     for _ in range(3):
         grown[1:] |= grown[:-1]; grown[:-1] |= grown[1:]; grown[:, 1:] |= grown[:, :-1]; grown[:, :-1] |= grown[:, 1:]
-    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-    grown &= ~((g - r > 18) | (b - r > 18))
+    grown &= ~ticks(rgb)
     clean = np.where(grown[..., None], rgb, 255).astype(np.uint8)
     ys, xs = np.nonzero(keep)
     return clean, (xs.min(), ys.min(), xs.max() + 1, ys.max() + 1)
