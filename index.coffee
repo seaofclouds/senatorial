@@ -19,6 +19,7 @@ papers =
   a4: short: "A4", name: "A4 — 210 × 297 mm", w: mm(210), h: mm(297)
   a5: short: "A5", name: "A5 — 148 × 210 mm", w: mm(148), h: mm(210)
   a6: short: "A6", name: "A6 — 105 × 148 mm", w: mm(105), h: mm(148)
+  b6jis: short: "B6 JIS", name: "B6 (JIS) — 128 × 182 mm", w: mm(128), h: mm(182)
   card3x5: short: "3×5 Card", name: "Index Card — 5 × 3", w: 5, h: 3
   card4x6: short: "4×6 Card", name: "Index Card — 6 × 4", w: 6, h: 4
   card5x8: short: "5×8 Card", name: "Index Card — 8 × 5", w: 8, h: 5
@@ -1587,7 +1588,9 @@ paperKey.onclick = ()-> openChooser()
 
 syncControls = ()->
   paperKey.textContent = paperName()
-  renderChooser() unless chooser.hidden
+  # Lay the desk out again once the keyboard has moved on, so tabbing out of a custom size lands on the next field
+  # rather than on one that's just been swept away
+  setTimeout (-> renderChooser() unless chooser.hidden), 0
   null
 
 # Hand the keyboard back to the page after pressing a key on the machine
@@ -1621,6 +1624,8 @@ renderChooser = ()->
   for btn in chooser.querySelectorAll "[data-landscape]"
     btn.classList.toggle "active", btn.dataset.landscape is "#{settings.landscape}"
   sheets = chooser.querySelector ".sheets"
+  # Whatever had the keyboard on the desk gets it back once the desk is laid out again
+  focused = sheets.contains(document.activeElement) and document.activeElement.dataset.key
   sheets.innerHTML = ""
   addSheet = (w, h, name, dims, active, choose)->
     sheet = document.createElement "div"
@@ -1672,6 +1677,7 @@ renderChooser = ()->
       field.min = 1
       field.max = 30
       field.value = settings[dim]
+      field.dataset.key = dim
       field.onclick = (e)-> e.stopPropagation()
       field.onchange = ()->
         unless field.value is "" or isNaN +field.value
@@ -1684,6 +1690,7 @@ renderChooser = ()->
   unless saved?
     keep = document.createElement "button"
     keep.className = "keep"
+    keep.dataset.key = "keep"
     keep.textContent = "Save size"
     keep.onclick = (e)->
       e.stopPropagation()
@@ -1694,6 +1701,10 @@ renderChooser = ()->
       save "papers", savedPapers
       changeSettings paper: "custom"
     sheet.append keep
+  if focused
+    again = sheets.querySelector "[data-key='#{focused}']"
+    again?.focus preventScroll: true
+    again?.select?()
   null
 
 for btn in chooser.querySelectorAll "[data-landscape]"
