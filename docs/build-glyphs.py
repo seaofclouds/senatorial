@@ -150,9 +150,9 @@ def drawn(img, red=False, threshold=70, smallest=40):
     H, W = mask.shape
     keep = np.zeros_like(mask)
     for ys, xs in components(mask):
-        # Drop specks of dust, pencil, and strokes that wandered in from a neighbouring cell. Pen is darker than
-        # pencil or dust, and on the red sheet it's red.
-        if len(ys) < smallest or abs(xs.mean() - W / 2) > W * 0.42: continue
+        # Drop specks of dust, pencil, and strokes that wandered in from a neighbouring cell or ran down off the row
+        # above. Pen is darker than pencil or dust, and on the red sheet it's red.
+        if len(ys) < smallest or abs(xs.mean() - W / 2) > W * 0.42 or ys.min() == 0: continue
         dark = amount[ys, xs].mean()
         if (redness[ys, xs].mean() < 50) if red else (dark < 120): continue
         if len(ys) < 60 and dark < 140: continue
@@ -262,12 +262,17 @@ def stamp(canvas, rgb, x, y):
     region = canvas[y:y + h, x:x + w]
     region[...] = np.minimum(region, rgb[:region.shape[0], :region.shape[1]])
 
-# Each weight's drawings are scaled by the one factor that brings its drawn capitals to the height of the typed ones,
-# and its drawn x-height letters to theirs, so every glyph keeps the weight of the pen it was drawn with
-def drawnScale(got):
+# Each weight's drawings are scaled together, by one factor, so every glyph keeps the weight of the pen it was drawn
+# with. It's the factor that brings the drawn capitals to the height of the typed ones, and the drawn x-height letters
+# to theirs, then a little more, so the pen's strokes come nearer the weight of the type (any smaller, and they read
+# lighter than the letters around them), double struck most of all. A few of the widest overlap their neighbours.
+enlarge = {"Light": 1.15, "Regular": 1.15, "Double struck": 1.3}
+room = (186, 220) # the most a drawing may take at 1200 dpi before the app would cut it off at the edges of its cell
+
+def drawnScale(got, title):
     heights = [(line["base"] - line["cap"], "ÆŒÐÞ"), (line["base"] - line["x"], "æœ")]
     ratios = [h / (got[c][1][3] - got[c][1][1]) for h, chars in heights for c in chars if c in got]
-    return float(np.median(ratios)) if ratios else 1
+    return (float(np.median(ratios)) if ratios else 1) * enlarge[title]
 
 def scaled(d, s):
     """A drawing d = (clean, box) at s times its size."""
@@ -305,8 +310,9 @@ def build():
                 if c["typed"]: continue
                 d = drawn(cutOut(scan, M, c), red=sheet == "red")
                 if d is not None: got[c["char"]] = (d[0], (d[1][0], d[1][1], d[1][2], d[1][3]))
-            s = drawnScale(got)
-            for c in got: got[c] = scaled(got[c], s)
+            s = drawnScale(got, sec["title"])
+            for c, (_, (x0, y0, x1, y1)) in got.items():
+                got[c] = scaled(got[c], min(s, room[0] / (x1 - x0), room[1] / (y1 - y0)))
             print(f"  {sec['title'].lower()} drawings set at {s:.2f} of the size they were drawn")
     # A character left blank in one section borrows its drawing from another of the same colour
     for (sheet, i), got in drawings.items():
@@ -349,10 +355,15 @@ def build():
                 if (kind, case) not in accents: continue
                 x0, y0, x1, y1 = inkBox(canvas[oy - originY:oy - originY + cellH, ox - originX:ox - originX + cellW])
                 bx, by0, by1 = (x0 + x1) / 2 - originX, y0 - originY, y1 - originY
-                if kind == "slash": at = (bx, "middle", (by0 + by1) / 2)
+                accent = accents[kind, case]
+                if kind == "slash":
+                    # struck through the letter, so reaching only a little past it
+                    h = accent[1][3] - accent[1][1]
+                    if h > 1.2 * (by1 - by0): accent = scaled(accent, 1.2 * (by1 - by0) / h)
+                    at = (bx, "middle", (by0 + by1) / 2)
                 elif kind == "cedilla": at = (bx, "top", line["base"] - 6)
                 else: at = (bx, "bottom", by0 - gap)
-                setDrawn(canvas, ox, oy, accents[kind, case], at=at)
+                setDrawn(canvas, ox, oy, accent, at=at)
         for c, kind in spacingAccents.items():
             if (kind, "low") not in accents: continue
             ox, oy = origin(c)

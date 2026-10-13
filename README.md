@@ -94,8 +94,9 @@ rebuilds them). They lay out every character at true size in each strike: the ty
 draw. Accents are drawn once each, over a capital and over a lowercase letter, after a typed letter to line them up
 against. To add or redraw glyphs, print a sheet at actual size, draw in the blanks, scan it at 1200 dpi into `scans/`,
 and run the build. It lines the scan up against the typed glyphs and cuts out each drawing. Every drawing in a weight is
-scaled by the same amount, the one that brings its drawn capitals and x-height letters to the typed ones' size, so all
-of them keep the weight of the pen they were drawn with. Each is set at the height its kind of character sits at (on
+scaled by the same amount, so all of them keep the weight of the pen they were drawn with: a little more than it takes
+to bring the drawn capitals and x-height letters to the typed ones' size, so the strokes come nearer the type's weight
+(`enlarge` in the build sets how much, for each weight). Each is set at the height its kind of character sits at (on
 the baseline, raised, centred, or hanging below), centred across its cell. Then it lays each accent over every letter
 that takes it.
 
