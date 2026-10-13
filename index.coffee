@@ -19,6 +19,7 @@ papers =
   a4: short: "A4", name: "A4 — 210 × 297 mm", w: mm(210), h: mm(297)
   a5: short: "A5", name: "A5 — 148 × 210 mm", w: mm(148), h: mm(210)
   a6: short: "A6", name: "A6 — 105 × 148 mm", w: mm(105), h: mm(148)
+  b6jis: short: "B6 JIS", name: "B6 (JIS) — 128 × 182 mm", w: mm(128), h: mm(182)
   card3x5: short: "3×5 Card", name: "Index Card — 5 × 3", w: 5, h: 3
   card4x6: short: "4×6 Card", name: "Index Card — 6 × 4", w: 6, h: 4
   card5x8: short: "5×8 Card", name: "Index Card — 8 × 5", w: 8, h: 5
@@ -42,12 +43,25 @@ defaultTabInterval = 5
 
 clamp = (v, lo, hi)-> Math.max lo, Math.min hi, v
 
-# Work out the character grid for the current sheet
-geometry = ()->
-  if settings.paper is "custom"
-    [w, h] = [settings.customW, settings.customH]
+# The size of the paper that's in, in inches, the way it's usually fed
+paperSize = ()->
+  if settings.paper is "custom" then [settings.customW, settings.customH]
   else
     {w, h} = papers[settings.paper] ? papers.letter
+    [w, h]
+
+# Margins to suit the paper: a quarter inch all round on a card, growing along a gentle curve with the sheet's short
+# side to an inch on letter and anything wider
+paperMargins = (w, h)->
+  t = clamp (Math.min(w, h) - 4) / 4.5, 0, 1
+  inches = 0.25 + 0.75 * t ** 1.5
+  cols = Math.round inches * charactersPerInch
+  lines = Math.round inches * linesPerInch
+  {left: cols, right: cols, top: lines, bottom: lines}
+
+# Work out the character grid for the current sheet
+geometry = ()->
+  [w, h] = paperSize()
   [w, h] = [h, w] if settings.landscape
   cols = Math.floor w * charactersPerInch
   rows = Math.floor h * linesPerInch
@@ -94,7 +108,7 @@ pad = gw * 0.4
 # The atlases are slightly rotated, so this tries to compensate
 skew = 1.3
 
-# Typographer's punctuation that the typewriter doesn't have, mapped to the keys you'd actually strike
+# Typographer's punctuation that the typewriter doesn't have, mapped to the keys you'd actually strike (until the atlas has its own)
 substitutions = "‘": "'", "’": "'", "“": "\"", "”": "\"", "–": "-", "—": "-", "×": "x"
 
 # This function returns the x,y pixel position within the atlas for a given character, or null if the character isn't in the atlas.
@@ -111,8 +125,8 @@ getGlyphPosInAtlas = (c)->
 glyphCache = {}
 glyph = (c)->
   glyphCache[c] ?= do ()->
-    [gx, gy] = getGlyphPosInAtlas substitutions[c] ? c
-    [gx, gy] = getGlyphPosInAtlas "*" unless gx? and gy?
+    [gx, gy] = getGlyphPosInAtlas c
+    [gx, gy] = getGlyphPosInAtlas substitutions[c] if not gx? and substitutions[c]?
     [gx, gy]
 
 # These images store the glyph atlases, one per strike & ribbon colour
@@ -990,6 +1004,7 @@ drawPage = (ctx, p, ppi)->
   text = layout.text
   strike = (img, c, px, py)->
     [gx, gy] = glyph c
+    return unless gx? # A key the machine doesn't have strikes nothing, leaving a blank space
     ctx.drawImage img, gx - pad, gy - pad, gw + pad*2, gh + pad*2, px - pad, py - pad, gw + pad*2, gh + pad*2
 
   # Where a line wraps in the middle of an underlined (or struck through, or X'd out) phrase, the typist stops at the
@@ -1534,8 +1549,11 @@ save = (name, val)->
 settings = null
 
 changeSettings = (changes)->
+  size = paperSize().join()
   Object.assign settings, changes
   normalize()
+  # Feeding in a different size of paper sets margins to suit it
+  Object.assign settings, paperMargins paperSize()... if paperSize().join() isnt size
   save "settings", settings # new pages start out on the same paper
   saveText()
   syncControls()
@@ -1586,7 +1604,9 @@ paperKey.onclick = ()-> openChooser()
 
 syncControls = ()->
   paperKey.textContent = paperName()
-  renderChooser() unless chooser.hidden
+  # Lay the desk out again once the keyboard has moved on, so tabbing out of a custom size lands on the next field
+  # rather than on one that's just been swept away
+  setTimeout (-> renderChooser() unless chooser.hidden), 0
   null
 
 # Hand the keyboard back to the page after pressing a key on the machine
@@ -1620,6 +1640,8 @@ renderChooser = ()->
   for btn in chooser.querySelectorAll "[data-landscape]"
     btn.classList.toggle "active", btn.dataset.landscape is "#{settings.landscape}"
   sheets = chooser.querySelector ".sheets"
+  # Whatever had the keyboard on the desk gets it back once the desk is laid out again
+  focused = sheets.contains(document.activeElement) and document.activeElement.dataset.key
   sheets.innerHTML = ""
   addSheet = (w, h, name, dims, active, choose)->
     sheet = document.createElement "div"
@@ -1671,11 +1693,11 @@ renderChooser = ()->
       field.min = 1
       field.max = 30
       field.value = settings[dim]
+      field.dataset.key = dim
       field.onclick = (e)-> e.stopPropagation()
       field.onchange = ()->
         unless field.value is "" or isNaN +field.value
-          Object.assign settings, "#{dim}": +field.value
-          changeSettings paper: "custom"
+          changeSettings paper: "custom", "#{dim}": +field.value
       size.append field
       size.append " × " if dim is "customW"
   sheet.append size
@@ -1683,6 +1705,7 @@ renderChooser = ()->
   unless saved?
     keep = document.createElement "button"
     keep.className = "keep"
+    keep.dataset.key = "keep"
     keep.textContent = "Save size"
     keep.onclick = (e)->
       e.stopPropagation()
@@ -1693,6 +1716,10 @@ renderChooser = ()->
       save "papers", savedPapers
       changeSettings paper: "custom"
     sheet.append keep
+  if focused
+    again = sheets.querySelector "[data-key='#{focused}']"
+    again?.focus preventScroll: true
+    again?.select?()
   null
 
 for btn in chooser.querySelectorAll "[data-landscape]"

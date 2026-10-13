@@ -13,8 +13,9 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
   done the typist's way, by striking another key over the letters. The alignment lever sets the paragraph you're in flush left, centred, or flush right.
 - The margin tabs, tab stops, and line space lever stay hidden until you point at the strip above a sheet or the margin
   to its left (on a phone, tap there).
-- The paper key, on the left of the control bar, lays out every kind of paper on the desk to feed in. Type in a custom
-  size and Save size names it and keeps it on the desk for next time (× forgets it).
+- The paper key, on the left of the control bar, lays out every kind of paper on the desk to feed in, and sets margins
+  to suit it: a quarter inch on a card, half an inch or so on A5, an inch on letter. Type in a custom size and Save size
+  names it and keeps it on the desk for next time (× forgets it).
 - The line space lever, under the top margin tab, sets single, 1½, or double spacing.
 - ⌘/Ctrl+Enter feeds a fresh sheet. Export PNG downloads each sheet as a 600 dpi picture.
 - Print prints each sheet on paper of its own size and orientation, edge to edge, in Chrome and Edge. Safari
@@ -68,6 +69,14 @@ Edit brings up the machine, and Save (in the same spot) puts it away again. Anyo
 changes when they come back to it), and their Edit key makes them a copy of their own, at its own link.
 
 Only the browser a page was made in can change it: it keeps the page's key, and the server keeps just a hash of it.
+
+## Adding glyphs
+
+`docs/character-sheet.pdf` and `docs/character-sheet-red.pdf` lay out every character Senatorial is meant to have, at
+true size, in each strike: the typewriter's own glyphs, cut from the scans in `glyphs/`, and a blank wherever one still
+needs drawing. Accents are drawn once each, over a capital and over a lowercase letter, in a blank beside a typed letter
+to line them up against, then laid over the typed letters. Print one at actual size, draw in the gaps, and scan it back
+in. `python3 docs/character-sheet.py` rebuilds them. A character the scans don't have yet types as a blank space.
 
 ## Running it
 
