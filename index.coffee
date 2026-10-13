@@ -1092,14 +1092,14 @@ normalizeCaret = ()->
 
 renderSelection = ()->
   return unless layout? and pageViews.length
-  normalizeCaret() unless applying
+  normalizeCaret() unless applying or composing
   [a, b] = selected()
 
   # Caret goes on the moving end of the selection
   focus = focusIndex()
   c = caretPoint focus
   Object.assign caretElm.style, left: c.x - 1 + "px", top: c.y + "px", height: c.h + "px"
-  Object.assign input.style, left: c.x + "px", top: c.y + "px", height: c.h + "px"
+  Object.assign input.style, left: c.x + "px", top: c.y + "px", height: c.h + "px" unless composing
 
   # Restart the blink so the caret is visible while it's moving
   caretElm.style.animation = "none"
@@ -1305,9 +1305,11 @@ deleteFor = (inputType)->
 # Every edit that could split or join a span goes through the paragraph rewriter. Plain typing goes straight in, so
 # typing Markdown by hand works too.
 input.addEventListener "beforeinput", (e)->
-  return if applying
-  [a, b] = selected()
   t = e.inputType
+  # An accent typed with a dead key (Option-n, then n, for ñ), or any input method, is the browser's to finish: Safari
+  # replaces the pending ˜ with the ñ by "deleting" it, which mustn't be taken for a press of the delete key
+  return if applying or composing or e.isComposing or /Composition/.test t
+  [a, b] = selected()
   emptyAlignedLine = a is b and alignAt(doc.text, doc.styles, a) isnt "left" and paragraphStart(doc.text, a) is a and
     doc.text[a] in [undefined, "\n", "\f"] and not input.value.slice(0, input.selectionStart).endsWith "->"
   # The first letter typed into an empty table cell rewrites the row, so it reads "| ok |" rather than "| ok|"
@@ -1929,6 +1931,7 @@ moveToLineEdge = (end, extend)->
 isMac = /Mac|iPhone|iPad/.test navigator.platform
 
 input.addEventListener "keydown", (e)->
+  return if e.isComposing or e.keyCode is 229 # keys that are part of an accent or input method go to it
   mod = if isMac then e.metaKey else e.ctrlKey
   verticalKey = e.key in ["ArrowUp", "ArrowDown", "PageUp", "PageDown"]
   goalCol = null unless verticalKey
@@ -1973,7 +1976,16 @@ input.addEventListener "input", (e)->
   syncTitle()
   publishSoon()
   render()
-  followCaret() unless applying # A rewrite puts the selection back itself, and decides whether to follow it
+  followCaret() unless applying or composing # A rewrite puts the selection back itself, and decides whether to follow it
+
+# While an accent or input method is part way through, leave the textarea and its caret be: moving either can make the
+# browser give up on what's being composed
+composing = false
+input.addEventListener "compositionstart", ()-> composing = true
+input.addEventListener "compositionend", ()->
+  composing = false
+  renderSelection()
+  followCaret()
 
 for type in ["select", "selectionchange", "keyup"]
   input.addEventListener type, ()-> renderSelection()
