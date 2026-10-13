@@ -262,13 +262,18 @@ def inkBox(rgb, threshold=90, smallest=30):
     ys, xs = np.concatenate([f[0] for f in found]), np.concatenate([f[1] for f in found])
     return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
 
-# The red pen is brighter and more orange than the typewriter's red ribbon, so red drawings are inked in the ribbon's
-# colour: each pixel takes the ribbon's colour at the same depth of ink, measured off the typed glyphs by how much green
-# the ink takes out of the paper (red ink takes out the most green, and keeps the red)
-def ribbonColours(scanned):
-    """A table from depth of red ink (0 to 255) to the colour the ribbon prints at that depth."""
-    px = np.concatenate([scanned[round(gy):round(gy + gh), round(gx):round(gx + gw)].reshape(-1, 3)
-                         for gx, gy in (atlasPos(c) for row in atlasLayout for c in row)]).astype(np.float64)
+# The red drawings were made with more than one red pen, so they're all inked in the one red, the most saturated pen's
+# (the double struck section's): each pixel takes that pen's colour at the same depth of ink, and the ink is made as
+# deep as that pen's. How deep red ink is goes by how much green it takes out of the paper (it takes out the most
+# green, and keeps the red).
+def inkDepth(images):
+    """How deep the red ink in images is, by the middle of its pixels."""
+    depth = np.concatenate([255 - im[..., 1].ravel().astype(int) for im in images])
+    return float(np.median(depth[depth > 60]))
+
+def inkColours(images):
+    """A table from depth of red ink (0 to 255) to its colour at that depth in images."""
+    px = np.concatenate([im.reshape(-1, 3) for im in images]).astype(np.float64)
     depth = 255 - px[:, 1].astype(int)
     count = np.bincount(depth, minlength=256)
     table = np.stack([np.bincount(depth, px[:, k], 256) for k in range(3)], 1) / np.maximum(count, 1)[:, None]
@@ -277,8 +282,8 @@ def ribbonColours(scanned):
     levels = np.arange(256)
     return np.stack([np.interp(levels, levels[have], table[have, k]) for k in range(3)], 1)
 
-def inRibbon(d, table, deepen):
-    """A red drawing d = (clean, box) inked in the ribbon's colours, its ink deepened by deepen to match the type's."""
+def inRed(d, table, deepen):
+    """A red drawing d = (clean, box) inked in the colours of table, its ink made deepen times as deep."""
     clean, box = d
     depth = np.clip(np.rint((255 - clean[..., 1].astype(np.float32)) * deepen), 0, 255).astype(int)
     return table[depth].round().astype(np.uint8), box
@@ -341,6 +346,12 @@ def build():
             for c, (_, (x0, y0, x1, y1)) in got.items():
                 got[c] = scaled(got[c], min(s, room[0] / (x1 - x0), room[1] / (y1 - y0)))
             print(f"  {sec['title'].lower()} drawings set at {s:.2f} of the size they were drawn")
+    pen = [d[0] for d in drawings["red", 2].values()]
+    penRed, penDepth = inkColours(pen), inkDepth(pen)
+    for i in [i for sheet, i in drawings if sheet == "red"]:
+        got = drawings["red", i]
+        deepen = penDepth / inkDepth([d[0] for d in got.values()])
+        for c in got: got[c] = inRed(got[c], penRed, deepen)
     # A character left blank in one section borrows its drawing from another of the same colour
     for (sheet, i), got in drawings.items():
         for (other, j), there in drawings.items():
@@ -357,15 +368,6 @@ def build():
         canvas = np.full((rows * cellH, columns * cellW, 3), 255, np.uint8)
         got = drawings[sheet, i]
         scanned = np.asarray(typedScan(typedName))
-        if sheet == "red":
-            # as deep as the typed glyphs' ink, by the middle of each's
-            depth = lambda a: np.median(a[a > 60])
-            typedDepth = depth(np.concatenate([255 - scanned[round(gy):round(gy + gh), round(gx):round(gx + gw), 1].ravel()
-                                               for gx, gy in (atlasPos(c) for row in atlasLayout for c in row)]).astype(int))
-            drawnDepth = depth(np.concatenate([255 - d[0][..., 1].ravel().astype(int) for d in got.values()]))
-            table = ribbonColours(scanned)
-            got = {c: inRibbon(d, table, typedDepth / drawnDepth) for c, d in got.items()}
-            print(f"  {name}: red drawings inked in the ribbon's red, {typedDepth / drawnDepth:.2f} as deep")
         def origin(c):
             n = order.index(c)
             return (n % columns) * cellW + originX, (n // columns) * cellH + originY

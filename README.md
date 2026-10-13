@@ -96,8 +96,8 @@ against. To add or redraw glyphs, print a sheet at actual size, draw in the blan
 and run the build. It lines the scan up against the typed glyphs and cuts out each drawing. Every drawing in a weight is
 scaled by the same amount, so all of them keep the weight of the pen they were drawn with: a little more than it takes
 to bring the drawn capitals and x-height letters to the typed ones' size, so the strokes come nearer the type's weight
-(`enlarge` in the build sets how much, for each weight). Red drawings are inked in the ribbon's red, measured off the
-typed red glyphs, since the red pen is brighter. Each is set at the height its kind of character sits at (on
+(`enlarge` in the build sets how much, for each weight). The red drawings were made with more than one red pen, so
+they're all inked in the one red, the most saturated pen's. Each is set at the height its kind of character sits at (on
 the baseline, raised, centred, or hanging below), centred across its cell. Then it lays each accent over every letter
 that takes it.
 
