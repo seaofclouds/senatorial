@@ -43,12 +43,25 @@ defaultTabInterval = 5
 
 clamp = (v, lo, hi)-> Math.max lo, Math.min hi, v
 
-# Work out the character grid for the current sheet
-geometry = ()->
-  if settings.paper is "custom"
-    [w, h] = [settings.customW, settings.customH]
+# The size of the paper that's in, in inches, the way it's usually fed
+paperSize = ()->
+  if settings.paper is "custom" then [settings.customW, settings.customH]
   else
     {w, h} = papers[settings.paper] ? papers.letter
+    [w, h]
+
+# Margins to suit the paper: a quarter inch all round on a card, growing along a gentle curve with the sheet's short
+# side to an inch on letter and anything wider
+paperMargins = (w, h)->
+  t = clamp (Math.min(w, h) - 4) / 4.5, 0, 1
+  inches = 0.25 + 0.75 * t ** 1.5
+  cols = Math.round inches * charactersPerInch
+  lines = Math.round inches * linesPerInch
+  {left: cols, right: cols, top: lines, bottom: lines}
+
+# Work out the character grid for the current sheet
+geometry = ()->
+  [w, h] = paperSize()
   [w, h] = [h, w] if settings.landscape
   cols = Math.floor w * charactersPerInch
   rows = Math.floor h * linesPerInch
@@ -1536,8 +1549,11 @@ save = (name, val)->
 settings = null
 
 changeSettings = (changes)->
+  size = paperSize().join()
   Object.assign settings, changes
   normalize()
+  # Feeding in a different size of paper sets margins to suit it
+  Object.assign settings, paperMargins paperSize()... if paperSize().join() isnt size
   save "settings", settings # new pages start out on the same paper
   saveText()
   syncControls()
@@ -1681,8 +1697,7 @@ renderChooser = ()->
       field.onclick = (e)-> e.stopPropagation()
       field.onchange = ()->
         unless field.value is "" or isNaN +field.value
-          Object.assign settings, "#{dim}": +field.value
-          changeSettings paper: "custom"
+          changeSettings paper: "custom", "#{dim}": +field.value
       size.append field
       size.append " × " if dim is "customW"
   sheet.append size
