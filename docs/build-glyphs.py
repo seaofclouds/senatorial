@@ -241,9 +241,11 @@ def characterNames(have):
 
 # THE NEW GLYPH IMAGES ############################################################################
 
-# Every strike gets one image: the typed glyphs copied from the typewriter's scans, then the drawn ones. Built and
-# saved at 1200 dpi, the scans' own resolution: any less blurs away the dots of the ribbon's weave in every glyph.
-outDPI = 1200
+# Every strike gets one image: the typed glyphs copied from the typewriter's scans, then the drawn ones. Built at
+# 1200 dpi, the scans' own resolution, and saved twice: at 1200 in glyphs/1200/, for pages saved or printed at 1200
+# (any less blurs away the dots of the ribbon's weave in every glyph), and at 600 in glyphs/, a quarter the size, for
+# the screen and pages at 600. glyphs/layout.json measures both in pixels at 1200 dpi.
+screenDPI = 600
 columns = 24
 cellW, cellH = 200, 360          # at 1200 dpi, a glyph's cell plus room around it for accents and descenders
 padX, padY = gw * 0.4, gh * 2 / 3 # how much around its cell the app takes with each glyph
@@ -327,6 +329,20 @@ def setDrawn(canvas, ox, oy, d, rule=None, at=None):
     left = cx - w / 2
     top = {"top": v, "bottom": v - h, "middle": v - h / 2}[edge]
     stamp(canvas, piece, round(ox + left) - (x0 - max(x0 - m, 0)), round(oy + top) - (y0 - max(y0 - m, 0)))
+
+def savePalette(img, path):
+    """Save img as a palette of 256 colours, plenty for one colour of ink on white paper, and keeping the tint of each
+    pen's black (the gel pen's is a little blue) and the ribbon's."""
+    img = img.quantize(256, dither=Image.Dither.NONE)
+    # The paper stays pure white. Quantizing averages it with the palest specks of ink, and the app overlaps glyphs
+    # darkest over lightest, so off-white paper would show as a faint box behind every glyph.
+    palette = img.getpalette()
+    paper = max(img.getcolors())[1]
+    palette[3 * paper:3 * paper + 3] = [255, 255, 255]
+    img.putpalette(palette)
+    os.makedirs(os.path.dirname(here(path)), exist_ok=True)
+    img.save(here(path), optimize=True)
+    print(f"{path}: {img.width} × {img.height}")
 
 def build():
     # Every drawing on both sheets, by sheet and section
@@ -425,33 +441,23 @@ def build():
                 if a in order and a not in hanging:
                     ox, oy = origin(a)
                     box = inkBox(canvas[oy - originY:oy - originY + cellH, ox - originX:ox - originX + cellW])
-                    if box: accentBottom[a] = (box[3] - originY) * outDPI / atlasDPI
-        img = Image.fromarray(canvas).resize((canvas.shape[1] * outDPI // atlasDPI, canvas.shape[0] * outDPI // atlasDPI), Image.LANCZOS)
-        # Sharpened a touch, for print: about a pixel's worth at the 600 dpi pages export at. Any more and the ribbon's
-        # weave turns gritty and the ink goes solid black.
-        img = img.filter(ImageFilter.UnsharpMask(radius=1.5, percent=40, threshold=3))
-        # Saved as a palette of 256 colours, plenty for one colour of ink on white paper, and keeping the tint of each
-        # pen's black (the gel pen's is a little blue) and the ribbon's
-        img = img.quantize(256, dither=Image.Dither.NONE)
-        # The paper stays pure white. Quantizing averages it with the palest specks of ink, and the app overlaps glyphs
-        # darkest over lightest, so off-white paper would show as a faint box behind every glyph.
-        palette = img.getpalette()
-        paper = max(img.getcolors())[1]
-        palette[3 * paper:3 * paper + 3] = [255, 255, 255]
-        img.putpalette(palette)
-        img.save(here("glyphs", name + ".png"), optimize=True)
-        print(f"glyphs/{name}.png: {img.width} × {img.height}")
-    s = outDPI / atlasDPI
+                    if box: accentBottom[a] = int(box[3]) - originY
+        # Sharpened a touch, for print: about a pixel's worth at 600 dpi. Any more and the ribbon's weave turns gritty
+        # and the ink goes solid black.
+        img = Image.fromarray(canvas).filter(ImageFilter.UnsharpMask(radius=1.5, percent=40, threshold=3))
+        savePalette(img, os.path.join("glyphs", "1200", name + ".png"))
+        f = atlasDPI // screenDPI
+        savePalette(img.resize((img.width // f, img.height // f), Image.LANCZOS), os.path.join("glyphs", name + ".png"))
     have = set(order)
     names = characterNames(have)
     json.dump({
-        "dpi": outDPI, "columns": columns, "cellWidth": cellW * s, "cellHeight": cellH * s,
-        "glyphX": originX * s, "glyphY": originY * s, "chars": "".join(order),
+        "dpi": atlasDPI, "columns": columns, "cellWidth": cellW, "cellHeight": cellH,
+        "glyphX": originX, "glyphY": originY, "chars": "".join(order),
         "lookalikes": {c: g for c, g in lookalikes.items() if g in have and c not in have},
         "overstrikes": {m: a for m, a in overstrikes.items() if a in have},
         "hanging": hanging,
         # where the bottom of an accent goes, over a capital and over a lowercase letter, down from a glyph's top
-        "accentLine": {"cap": (line["cap"] - gap) * s, "low": (line["x"] - gap) * s},
+        "accentLine": {"cap": line["cap"] - gap, "low": line["x"] - gap},
         "accentBottom": accentBottom,
         "names": names,
     }, open(here("glyphs", "layout.json"), "w"), ensure_ascii=False, indent=None, separators=(",", ":"))

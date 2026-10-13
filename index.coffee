@@ -3,8 +3,9 @@
 # Everything is measured in real-world inches, so pages come out at their true physical size
 charactersPerInch = 11 # this is based on the actual typewriter
 linesPerInch = 6 # standard typewriter line feed — single spacing is 1/6"
-atlasDPI = 1200 # the glyph images' resolution (glyphs/layout.json)
-exportDPI = 600 # Resolution of saved & printed pages. Change it to whatever you want, and everything Just Works™
+atlasDPI = 1200 # what glyphs/layout.json measures the glyph images in: pixels at 1200 dpi
+exportDPIs = [600, 1200] # Resolutions pages can be saved & printed at, picked beside Export PNG
+exportDPI = 600 # the one they're saved & printed at, until another's picked
 
 # PAPER ###########################################################################################
 
@@ -132,11 +133,26 @@ glyph = (c)->
       parts.push [ax, ay, lift]
     parts
 
-# These images store the glyph atlases, one per strike & ribbon colour
+# These images store the glyph atlases, one per strike & ribbon colour: at 600 dpi in glyphs/, for the screen and for
+# pages saved at 600, and at 1200 in glyphs/1200/, loaded the first time a page is saved or printed at more than 600
 atlases = {}
+printAtlases = null # a promise of the 1200 dpi ones
 atlasNames = ["regular", "light", "double", "regular-red", "light-red", "double-red"]
 
-atlasFor = (style)-> atlases[style.weight + (if style.red then "-red" else "")]
+atlasFor = (style, set = atlases)-> set[style.weight + (if style.red then "-red" else "")]
+
+loadImage = (src)-> new Promise (resolve, reject)->
+  img = new Image()
+  img.onload = ()-> resolve img
+  img.onerror = reject
+  img.src = src
+
+loadPrintAtlases = ()->
+  printAtlases ?= Promise.all(atlasNames.map (name)-> loadImage("glyphs/1200/#{name}.png").then (img)-> [name, img])
+    .then(Object.fromEntries)
+    .catch (e)-> # try again next time
+      printAtlases = null
+      throw e
 
 loadAtlases = ()->
   loaded = 0
@@ -1012,15 +1028,16 @@ render = ()->
   slideCarriage carriageX
   renderSelection()
 
-# Draw one page onto a canvas, at the given pixels per inch (screen, or exportDPI for saving)
-drawPage = (ctx, p, ppi)->
+# Draw one page onto a canvas, at the given pixels per inch (screen, or exportDPI for saving), from a set of atlases,
+# leaving off the top rows of pixels
+drawPage = (ctx, p, ppi, set = atlases, top = 0)->
   ctx.setTransform 1, 0, 0, 1, 0, 0
   ctx.globalCompositeOperation = "source-over"
   ctx.fillStyle = "#fff"
   ctx.fillRect 0, 0, ctx.canvas.width, ctx.canvas.height
 
   s = ppi / atlasDPI
-  ctx.setTransform s, 0, 0, s, 0, 0
+  ctx.setTransform s, 0, 0, s, 0, -top
   ctx.imageSmoothingQuality = "high"
 
   # The extra padding on chars means they overlap, so this allows them to overlap nicely
@@ -1031,7 +1048,9 @@ drawPage = (ctx, p, ppi)->
   strike = (img, c, px, py)->
     # A key the machine doesn't have strikes nothing, leaving a blank space
     for [gx, gy, lift] in glyph c
-      ctx.drawImage img, gx - padX, gy - padY, gw + padX*2, gh + padY*2, px - padX, py - padY + lift, gw + padX*2, gh + padY*2
+      k = img.naturalWidth / (atlas.columns * atlas.cellWidth) # image pixels to atlas pixels at atlasDPI
+      ctx.drawImage img, (gx - padX) * k, (gy - padY) * k, (gw + padX*2) * k, (gh + padY*2) * k,
+        px - padX, py - padY + lift, gw + padX*2, gh + padY*2
 
   # Where a line wraps in the middle of an underlined (or struck through, or X'd out) phrase, the typist stops at the
   # last letter on the line and starts again at the first one on the next: the spaces around the wrap go bare
@@ -1049,7 +1068,7 @@ drawPage = (ctx, p, ppi)->
     c = text[i]
     continue if c in ["\n", "\t", "\f", cellBreak, cellLineBreak]
     style = decodeStyle doc.styles[i]
-    img = atlasFor style
+    img = atlasFor style, set
     continue unless img?
     [_, line, col] = layout.pos[i]
     px = col * gw
@@ -2619,18 +2638,37 @@ document.addEventListener "visibilitychange", refreshPage
 
 # SAVE & PRINT ####################################################################################
 
-renderPageAtExportSize = (p)->
+# Beside Export PNG, the resolution pages are saved and printed at
+exportDPI = load "exportDPI", exportDPI
+exportDPI = exportDPIs[0] unless exportDPI in exportDPIs
+dpiLever = makeLever "dpi", exportDPIs, String, (dpi)->
+  exportDPI = save "exportDPI", dpi
+  setLever dpiLever, exportDPIs, exportDPI
+dpiLever.title = "Resolution to save and print pages at, in dots per inch"
+dpiLever.insertAdjacentHTML "beforeend", "<span>dpi</span>"
+setLever dpiLever, exportDPIs, exportDPI
+$("#download").before dpiLever
+
+# The resolution to save and print at: the one picked, or for a sheet too big for the browser to draw at that (16384 ×
+# 16384 pixels in all, or 32767 across or down, is the most it will), the most it can
+exportResolution = ()->
+  Math.floor Math.min exportDPI, Math.sqrt(16384 * 16384 / (geo.w * geo.h)), 32767 / Math.max(geo.w, geo.h)
+
+# Page p at that resolution, or just rows [y0, y1) of it
+renderPageAtExportSize = (p, y0 = 0, y1 = null)->
+  dpi = exportResolution()
+  set = if dpi > exportDPIs[0] then await loadPrintAtlases() else atlases
   canvas = document.createElement "canvas"
-  canvas.width = Math.round geo.w * exportDPI
-  canvas.height = Math.round geo.h * exportDPI
-  drawPage canvas.getContext("2d"), p, exportDPI
+  canvas.width = Math.round geo.w * dpi
+  canvas.height = (y1 ? Math.round geo.h * dpi) - y0
+  drawPage canvas.getContext("2d"), p, dpi, set, y0
   canvas
 
 toBlob = (canvas)-> new Promise (resolve)-> canvas.toBlob resolve, "image/png"
 
 $("#download").onclick = ()->
   for _, p in layout.pages
-    blob = await toBlob renderPageAtExportSize p
+    blob = await toBlob await renderPageAtExportSize p
     link = document.createElement "a"
     link.href = URL.createObjectURL blob
     link.download = if layout.pages.length is 1 then "senatorial.png" else "senatorial-page-#{p + 1}.png"
@@ -2693,13 +2731,24 @@ $("#print").onclick = ()->
     }
   """ if isSafari
   printElm.append style
+  # A browser won't show an image of more than 2²⁶ pixels (Chrome's limit), so a sheet bigger than that, as at 1200 dpi,
+  # goes to the printer in strips, one under the next
+  dpi = exportResolution()
+  w = Math.round geo.w * dpi
+  h = Math.round geo.h * dpi
+  strips = Math.ceil h / Math.floor 2 ** 26 / w
   for _, p in layout.pages
     leaf = document.createElement "div"
     leaf.className = "leaf"
-    img = new Image()
-    img.src = URL.createObjectURL await toBlob renderPageAtExportSize p
-    await img.decode()
-    leaf.append img, trimMarks()...
+    for k in [0...strips]
+      y0 = Math.round h * k / strips
+      y1 = Math.round h * (k + 1) / strips
+      img = new Image()
+      img.src = URL.createObjectURL await toBlob await renderPageAtExportSize p, y0, y1
+      img.style.height = "#{(y1 - y0) / h * 100}%"
+      await img.decode()
+      leaf.append img
+    leaf.append trimMarks()...
     printElm.append leaf
   window.print()
 
