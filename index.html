@@ -465,6 +465,17 @@
     button.active svg { stroke: var(--key-text); }
   }
 
+  /* Beside Export PNG, the resolutions engraved as numbers */
+  .lever.dpi {
+    gap: .1em;
+    padding: 0 .6em 0 .3em;
+    font-size: .8rem;
+    color: hsl(38, 2%, 62%);
+
+    button { width: auto; padding: 0 .3em; font-size: inherit; color: inherit; }
+    button.active { color: var(--key-text); }
+  }
+
   /* On the sheet, the line space lever stands upright along the left edge, under the top margin tab,
      the same width as the tabs */
   .lever.spacing {
@@ -686,7 +697,7 @@
       <button id="new" title="Feed in a fresh page, at a new link">New</button>
       <button id="import" title="Open a Markdown or text file in place of this page">Import Markdown</button>
       <input type="file" id="importFile" accept=".md,.markdown,.txt,text/markdown,text/x-markdown,text/plain" hidden>
-      <button id="download" title="Each page as a 600 dpi picture">Export PNG</button>
+      <button id="download" title="Each page as a picture, at the resolution beside it">Export PNG</button>
       <button id="export" title="The text, as a Markdown file">Export Markdown</button>
       <button id="print" title="Print each sheet on paper of its own size">Print</button>
       <button class="edit-key" hidden>Save</button>

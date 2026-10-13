@@ -26,7 +26,9 @@ onto true-to-size sheets of paper at 11 characters and 6 lines to the inch.
 - The character key (ñ ½ →), beside the paper key, lays out every character the machine strikes that isn't on the
   keyboard. Click one to type it. Dead keys and input methods work too (Option-N then N for ñ).
 - The line space lever, under the top margin tab, sets single, 1½, or double spacing.
-- ⌘/Ctrl+Enter feeds a fresh sheet. Export PNG downloads each sheet as a 600 dpi picture.
+- ⌘/Ctrl+Enter feeds a fresh sheet. Export PNG downloads each sheet as a picture, at 600 or 1200 dpi, as set beside
+  it. Print prints at the same resolution. At 1200, a sheet is four times the pixels, so it takes longer and a letter
+  page comes to about 40 MB; a sheet too big for the browser to draw at 1200 comes out at the most it can.
 - Print prints each sheet on paper of its own size and orientation, edge to edge, in Chrome and Edge. Safari
   prints on whatever paper its print dialog has picked, so pick the sheet's size there; if the paper's bigger, the
   sheet comes out at its true size in the middle, with trim marks to cut it out by.
@@ -86,9 +88,10 @@ Only the browser a page was made in can change it: it keeps the page's key, and 
 
 ## Glyphs
 
-Every strike (light, regular and double struck, in black and in red) has one image in `glyphs/`, with the glyphs set
-out in a grid in the order `glyphs/layout.json` lists them, at 600 dpi. A character the images don't have types as a
-blank space.
+Every strike (light, regular and double struck, in black and in red) has one image of its glyphs, set out in a grid in
+the order `glyphs/layout.json` lists them, in two resolutions: 600 dpi in `glyphs/`, for the screen and for pages saved
+or printed at 600, and 1200 dpi in `glyphs/1200/`, loaded the first time a page is saved or printed at 1200. A
+character the images don't have types as a blank space.
 
 They're built by `python3 docs/build-glyphs.py`, from two sources in `scans/`:
 
