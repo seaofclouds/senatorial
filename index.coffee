@@ -1112,6 +1112,7 @@ caretPoint = (i)->
   h: pxPerInch / linesPerInch
 
 focusIndex = ()->
+  return Math.min dragged[1], layout.n if dragged?
   Math.min visAt(if input.selectionDirection is "backward" then input.selectionStart else input.selectionEnd), layout.n
 
 # Keep a lone caret out of the middle of a marker, so whatever's typed lands where it looks like it will
@@ -1126,14 +1127,14 @@ normalizeCaret = ()->
 
 renderSelection = ()->
   return unless layout? and pageViews.length
-  normalizeCaret() unless applying or composing
+  normalizeCaret() unless applying or composing or dragged?
   [a, b] = selected()
 
   # Caret goes on the moving end of the selection
   focus = focusIndex()
   c = caretPoint focus
   Object.assign caretElm.style, left: c.x - 1 + "px", top: c.y + "px", height: c.h + "px"
-  Object.assign input.style, left: c.x + "px", top: c.y + "px", height: c.h + "px" unless composing
+  Object.assign input.style, left: c.x + "px", top: c.y + "px", height: c.h + "px" unless composing or dragged?
 
   # Restart the blink so the caret is visible while it's moving
   caretElm.style.animation = "none"
@@ -1227,7 +1228,17 @@ rawAt = (k)-> rawAtIn doc, k
 visAt = (r)-> doc.visBefore[clamp r, 0, doc.raw.length]
 
 # The selection, in printed characters
-selected = ()-> [visAt(input.selectionStart), visAt(input.selectionEnd)]
+selected = ()->
+  return [Math.min(dragged...), Math.max(dragged...)] if dragged?
+  [visAt(input.selectionStart), visAt(input.selectionEnd)]
+
+# While the selection is being dragged out on a touch screen it's drawn as it goes, but only handed to the textarea when
+# the finger lifts: iOS answers every change to a focused field's selection (scrolling to show it, updating the
+# keyboard's suggestions), which would make the drag stutter and jump
+dragged = null # [anchor, focus], in printed characters
+dragTo = (anchor, focus)->
+  dragged = [clamp(anchor, 0, layout.n), clamp(focus, 0, layout.n)]
+  renderSelection()
 
 applying = false
 
@@ -2035,6 +2046,7 @@ setSelection = (anchor, focus, follow = true)->
   followCaret() if follow
 
 getAnchorFocus = ()->
+  return dragged.slice() if dragged?
   [a, b] = selected()
   if input.selectionDirection is "backward" then [b, a] else [a, b]
 
@@ -2199,6 +2211,7 @@ pagesElm.addEventListener "pointerdown", (e)->
   menuPutAway = null
 
   if e.pointerType is "touch"
+    return startHandleDrag which, e if which = handleNear e
     focused = document.activeElement is input
     pointer = touch: true, x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, tx: carriageX, sliding: false,
     count: clickCount(e), was: (if focused then selected() else null)
@@ -2236,20 +2249,34 @@ holdCaret = ()->
   caretMenuAt = goalCol = null
   dragSelection()
 
+# A handle is picked up by a touch on it or near it, like iOS's: anywhere close to its bar or knob
+startHandleDrag = (which, e)->
+  [a, b] = selected()
+  # Where the handle's end of the selection is, so the finger moves it from wherever it took hold
+  at = if which is "start" then caretPoint a else selectionEndPoint b
+  box = pagesElm.getBoundingClientRect()
+  pointer = cx: e.clientX, cy: e.clientY, handle:
+    which: which, fixed: (if which is "start" then b else a)
+    dx: box.left + at.x - e.clientX, dy: box.top + at.y + at.h / 2 - e.clientY
+  pagesElm.setPointerCapture e.pointerId
+  renderFormatMenu()
+
+handleNear = (e)->
+  best = null
+  for which, handle of handles when not handle.hidden
+    r = handle.getBoundingClientRect()
+    reach = 16
+    continue unless r.left - reach <= e.clientX <= r.right + reach and r.top - reach <= e.clientY <= r.bottom + reach
+    d = Math.hypot e.clientX - (r.left + r.right) / 2, e.clientY - (r.top + r.bottom) / 2
+    best = {which, d} if not best? or d < best.d
+  best?.which
+
 for which, handle of handles
   do (which, handle)->
     handle.addEventListener "pointerdown", (e)->
       e.preventDefault()
       touchScreen = e.pointerType is "touch"
-      [a, b] = selected()
-      # Where the handle's end of the selection is, so the finger moves it from wherever it took hold
-      at = if which is "start" then caretPoint a else selectionEndPoint b
-      box = pagesElm.getBoundingClientRect()
-      pointer = cx: e.clientX, cy: e.clientY, handle:
-        which: which, fixed: (if which is "start" then b else a)
-        dx: box.left + at.x - e.clientX, dy: box.top + at.y + at.h / 2 - e.clientY
-      handle.setPointerCapture e.pointerId
-      renderFormatMenu()
+      startHandleDrag which, e
     # Keep the keyboard up, and the selection with it
     handle.addEventListener "touchstart", ((e)-> e.preventDefault()), passive: false
 
@@ -2263,24 +2290,24 @@ dragSelection = ()->
     # Like iOS, the handles don't cross: there's always at least a character between them
     if which is "start"
       i = Math.min i, fixed - 1
-      setSelection fixed, i, false
+      dragTo fixed, i
       showLoupe caretPoint i
     else
       i = Math.max i, fixed + 1
-      setSelection fixed, i, false
+      dragTo fixed, i
       showLoupe selectionEndPoint Math.min i, layout.n
   else if pointer.caret
     i = hitTest clientX: cx, clientY: cy
-    setSelection i, i, false
+    dragTo i, i
     showLoupe caretPoint i
   else if pointer.span?
     [a, b] = pointer.span
     [s, t] = expand hitTest(clientX: cx, clientY: cy), pointer.count
     if s < a
-      setSelection b, s, false
+      dragTo b, s
       showLoupe caretPoint s
     else
-      setSelection a, Math.max(b, t), false
+      dragTo a, Math.max(b, t)
       showLoupe selectionEndPoint Math.max b, t
 
 dragging = ()-> pointer? and (pointer.handle? or pointer.caret or pointer.span?)
@@ -2291,12 +2318,13 @@ scrollWhileDragging = ()->
   speeds = ()->
     return [0, 0] unless dragging()
     edge = (by_)-> Math.min 20, 2 + by_ / 3
-    top = 48
-    bottom = deckElm.getBoundingClientRect().top - 24
-    side = 32
-    vx = if pointer.cx < side then -edge(side - pointer.cx)
-    else if pointer.cx > innerWidth - side then edge(pointer.cx - innerWidth + side)
-    else 0
+    # What's in view: above the keyboard, if it's up, and the machine
+    view = visibleArea()
+    top = view.top + 48
+    bottom = Math.min(view.bottom, deckElm.getBoundingClientRect().top) - 24
+    left = view.left + 32
+    right = view.right - 32
+    vx = if pointer.cx < left then -edge(left - pointer.cx) else if pointer.cx > right then edge(pointer.cx - right) else 0
     vy = if pointer.cy < top then -edge(top - pointer.cy) else if pointer.cy > bottom then edge(pointer.cy - bottom) else 0
     [vx, vy]
   return if pointer.scrolling or speeds().every (v)-> v is 0
@@ -2312,6 +2340,12 @@ scrollWhileDragging = ()->
     dragSelection()
     requestAnimationFrame step
   requestAnimationFrame step
+
+# The part of the window that can be seen, in the same terms as the pointer: less the keyboard, when it's up
+visibleArea = ()->
+  v = window.visualViewport
+  return {left: 0, top: 0, right: innerWidth, bottom: innerHeight} unless v?
+  left: v.offsetLeft, top: v.offsetTop, right: v.offsetLeft + v.width, bottom: v.offsetTop + v.height
 
 # The loupe: the type around a point on the pages (where the caret or a handle is), magnified, above the finger
 loupeW = 132
@@ -2355,8 +2389,9 @@ showLoupe = (pt)->
   ctx.fillRect (pt.x - sx) * loupeZoom - 1, (pt.y - sy) * loupeZoom, 2, pt.h * loupeZoom
   # Above the line, clear of the finger, and on screen
   box = pagesElm.getBoundingClientRect()
-  left = clamp box.left + pt.x - loupeW / 2, 8, innerWidth - loupeW - 8
-  top = Math.max 8, box.top + pt.y - loupeH - 28
+  view = visibleArea()
+  left = clamp box.left + pt.x - loupeW / 2, view.left + 8, view.right - loupeW - 8
+  top = Math.max view.top + 8, box.top + pt.y - loupeH - 28
   Object.assign loupe.style, left: left + "px", top: top + "px"
   loupe.hidden = false
 
@@ -2407,6 +2442,10 @@ pagesElm.addEventListener "pointercancel", ()->
   endPointer()
 
 endPointer = ()->
+  if dragged?
+    [anchor, focus] = dragged
+    dragged = null
+    setSelection anchor, focus, false
   pointer = null
   hideLoupe()
   pagesElm.classList.remove "sliding"
