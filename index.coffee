@@ -1700,7 +1700,7 @@ syncControls = ()->
   null
 
 # Hand the keyboard back to the page after pressing a key on the machine
-for elm in document.querySelectorAll ".buttons button:not(#paper):not(#characters):not(#import)"
+for elm in document.querySelectorAll ".buttons button:not(#paper):not(#characters):not(#import):not(#pages)"
   elm.addEventListener "click", ()-> input.focus preventScroll: true
 
 # PAPER CHOOSER ###################################################################################
@@ -2455,15 +2455,29 @@ window.addEventListener "resize", ()-> render()
 # PAGES & LINKS ###################################################################################
 
 # Every page lives at its own link, /s/<id>, and is saved there as it's typed, so it's always ready to share. Anyone
-# with the link sees the page as it stands, read-only. The browser that made a page keeps its key and can edit it:
-# Edit brings up the machine, and Save (the same key) puts it away again. Anyone else's Edit makes them a copy of
-# their own.
+# with the link sees the page as it stands, read-only. Your own pages open for editing: Edit brings up the machine,
+# and Save (the same key) puts it away again. Anyone else's Edit makes them a copy of their own.
 # Visiting the site itself goes back to the page you were last working on, or feeds in a fresh one.
+#
+# Your pages are on your desk: a key this browser keeps, which the server knows only by its hash. Opening the desk's
+# link in another browser puts the same desk there, so every page on it can be found and edited from that one too.
 
 editKey = $ ".edit-key"
 savedLabel = $ ".saved"
 
-shares = load "shares", {} # id → key, for each page made here
+randomString = (n, alphabet)-> (alphabet[v % alphabet.length] for v in crypto.getRandomValues new Uint32Array n).join ""
+keyAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789"
+sha256 = (text)->
+  digest = await crypto.subtle.digest "SHA-256", new TextEncoder().encode text
+  (b.toString(16).padStart 2, "0" for b in new Uint8Array digest).join ""
+
+deskKey = load("desk", null) ? save "desk", randomString 32, keyAlphabet
+deskHash = null # worked out as the page starts
+deskPages = load "deskPages", [] # what was on the desk when last looked: {id, title, settings, updated}
+made = load "made", [] # pages fed in here, which are on this desk whether or not they've anything on them yet
+shares = load "shares", {} # id → key, for pages made here before there were desks
+claimed = load "claimed", [] # which of those have been put on the desk
+
 pageId = null # the page on the machine
 pageUpdated = null # when the server's copy of it last changed, as far as we know
 published = null # what the server was last sent, so an unchanged page isn't sent again
@@ -2472,23 +2486,25 @@ publishTimer = null
 publishing = false
 publishAgain = false
 
-randomString = (n, alphabet)-> (alphabet[v % alphabet.length] for v in crypto.getRandomValues new Uint32Array n).join ""
 pageUrl = (id)-> "#{location.origin}/s/#{id}"
+deskUrl = ()-> "#{location.origin}/#desk=#{deskKey}"
 pageBody = ()-> JSON.stringify markdown: input.value, settings: settings
 pageTitle = ()-> (doc.text.split(/[\n\f]/).find((line)-> line.trim()) ? "").replace(/[\u001F ]/g, " ").trim()
-owns = (id)-> id? and shares[id]?
+owns = (id)-> id? and (shares[id]? or id in made or deskPages.some (page)-> page.id is id)
+keyFor = (id)-> shares[id] ? deskKey
+auth = (key)-> {"content-type": "application/json", authorization: "Bearer #{key}"}
 
-# A new page, with a key only this browser has
+# A new page, on this desk
 makePage = ()->
   id = randomString 10, "abcdefghjkmnpqrstuvwxyz23456789"
-  shares[id] = randomString 32, "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789"
-  save "shares", shares
+  made.push id
+  save "made", made
   id
 
 # Each page you make is also kept here, so nothing's lost if it can't reach the server for a while.
 # pending means it has changes the server hasn't got yet.
 cachePage = (pending)->
-  save "page:#{pageId}", {markdown: input.value, settings, pending} if owns pageId
+  save "page:#{pageId}", {markdown: input.value, settings, pending, updated: pageUpdated} if owns pageId
 cachedPage = (id)-> load "page:#{id}", null
 
 # Put a page on the machine
@@ -2508,6 +2524,10 @@ syncTitle = ()->
   title = pageTitle()
   document.title = if title then "#{title} — Senatorial" else "Senatorial"
 
+syncEditKey = ()->
+  editKey.textContent = if not viewing then "Save" else if owns pageId then "Edit" else "Edit a copy"
+  editKey.hidden = pageMissing and not owns pageId
+
 # Reading a page, or typing on it
 setMode = (edit)->
   viewing = not edit
@@ -2515,8 +2535,7 @@ setMode = (edit)->
   input.readOnly = viewing
   caretElm.hidden = viewing
   gutterL = if viewing then 16 else 64
-  editKey.textContent = if not viewing then "Save" else if owns pageId then "Edit" else "Edit a copy"
-  editKey.hidden = pageMissing and not owns pageId
+  syncEditKey()
   if viewing
     formatMenu.hidden = true
     showTools null
@@ -2552,7 +2571,7 @@ editKey.onclick = ()->
   setMode true
 
 # A fresh sheet, at a new link. The page that was on the machine stays at its own.
-$("#new").onclick = ()->
+newPage = ()->
   publish()
   id = makePage()
   history.pushState null, "", "/s/#{id}"
@@ -2576,14 +2595,15 @@ publish = ()->
   return publishAgain = true if publishing
   body = pageBody()
   return if body is published
+  return if not pageUpdated? and not input.value.trim() # a fresh sheet goes on the desk once something's typed on it
   id = pageId
   publishing = true
   savedLabel.textContent = "Saving…"
   try
     res = await fetch "/api/shares/#{id}",
       method: "PUT"
-      headers: {"content-type": "application/json", authorization: "Bearer #{shares[id]}"}
-      body: body
+      headers: auth keyFor id
+      body: JSON.stringify {markdown: input.value, settings, owner: deskHash ? undefined}
       keepalive: body.length < 60000 # so it still goes out if the page is closing
   catch
     res = null
@@ -2616,6 +2636,134 @@ refreshPage = ()->
 
 setInterval refreshPage, 30000
 document.addEventListener "visibilitychange", refreshPage
+
+# THE DESK ########################################################################################
+
+# Look at what's on the desk
+refreshDesk = ()->
+  try
+    res = await fetch "/api/desk", headers: auth(deskKey), cache: "no-store"
+    return unless res.ok
+    deskPages = save "deskPages", (await res.json()).pages
+    syncEditKey()
+  catch
+    null
+
+# Put the pages made here before there were desks onto this one
+claimPages = ()->
+  await Promise.all(for id, key of shares when id not in claimed
+    do (id, key)->
+      try
+        res = await fetch "/api/shares/#{id}", method: "PATCH", headers: auth(key), body: JSON.stringify owner: deskHash
+        claimed.push id if res.ok or res.status is 404 # (one that never reached the server joins when it does)
+      catch
+        null
+  )
+  save "claimed", claimed
+
+# Opening a desk's link puts that desk here. Pages made here can come along to it.
+takeUpDesk = (key)->
+  history.replaceState null, "", "/"
+  unless key is deskKey
+    deskHash ?= await sha256 deskKey
+    if (made.length or Object.keys(shares).length) and confirm "Bring the pages typed in this browser onto this desk too?"
+      await claimPages()
+      try
+        await fetch "/api/desk/merge", method: "POST", headers: auth(deskKey), body: JSON.stringify into: await sha256 key
+      catch
+        null
+    deskKey = save "desk", key
+    deskPages = save "deskPages", []
+    await refreshDesk()
+  location.replace "/#pages"
+
+# Press the Pages key, and every page on the desk is laid out, the latest first, at true relative size,
+# with a fresh sheet to start on
+desk = $ ".desk"
+
+openDesk = ()->
+  desk.hidden = false
+  document.body.classList.add "choosing"
+  renderDesk()
+  await refreshDesk()
+  renderDesk() unless desk.hidden
+
+closeDesk = ()->
+  desk.hidden = true
+  document.body.classList.remove "choosing"
+  input.focus preventScroll: true unless viewing
+
+paperSize = (s)->
+  s = Object.assign {}, defaults, s
+  [w, h] = if s.paper is "custom" or not papers[s.paper]? then [s.customW, s.customH] else [papers[s.paper].w, papers[s.paper].h]
+  if s.landscape then [h, w] else [w, h]
+
+ago = (time)->
+  minutes = (Date.now() - time) / 60000
+  if minutes < 1 then "just now"
+  else if minutes < 60 then "#{Math.round minutes} min ago"
+  else if minutes < 60 * 24 then "#{Math.round minutes / 60} hr ago"
+  else new Date(time).toLocaleDateString undefined, month: "short", day: "numeric", year: "numeric"
+
+renderDesk = ()->
+  sheets = desk.querySelector ".sheets"
+  sheets.innerHTML = ""
+  addSheet = (s, name, detail, active, choose)->
+    [w, h] = paperSize s
+    sheet = document.createElement "div"
+    sheet.className = "sheet typed"
+    sheet.classList.add "active" if active
+    sheet.style.width = w * chooserScale + "px"
+    sheet.style.height = h * chooserScale + "px"
+    sheet.innerHTML = "<span class='name'></span><span class='dims'></span>"
+    sheet.querySelector(".name").textContent = name
+    sheet.querySelector(".dims").textContent = detail
+    sheet.onclick = choose
+    sheets.append sheet
+    sheet
+
+  addSheet settings, "New page", "", false, ()->
+    closeDesk()
+    newPage()
+
+  # The page on the machine is on the desk, even before the server has heard of it
+  pages = deskPages.slice()
+  if owns(pageId) and not pages.some((page)-> page.id is pageId) and input.value.trim()
+    pages.unshift {id: pageId, title: pageTitle(), settings, updated: Date.now()}
+  for page in pages
+    do (page)->
+      title = if page.id is pageId then pageTitle() or page.title else page.title
+      sheet = addSheet page.settings, title or "Untitled", ago(page.updated), page.id is pageId, ()->
+        if page.id is pageId then closeDesk() else location.href = "/s/#{page.id}#edit"
+      forget = document.createElement "button"
+      forget.className = "forget"
+      forget.title = "Throw this page away"
+      forget.textContent = "×"
+      forget.onclick = (e)->
+        e.stopPropagation()
+        return unless confirm "Throw away “#{title or "Untitled"}”? Its link will stop working."
+        try
+          res = await fetch "/api/shares/#{page.id}", method: "DELETE", headers: auth keyFor page.id
+        catch
+          return alert "Couldn't reach the server. Try again in a moment."
+        deskPages = save "deskPages", deskPages.filter (p)-> p.id isnt page.id
+        try localStorage.removeItem "page:#{page.id}"
+        if page.id is pageId then newPage() else renderDesk()
+      sheet.append forget
+  null
+
+$("#pages").onclick = openDesk
+desk.onclick = (e)-> closeDesk() if e.target is desk or e.target.matches ".sheets"
+document.addEventListener "keydown", (e)-> closeDesk() if e.key is "Escape" and not desk.hidden
+
+copyDeskKey = desk.querySelector ".copy-desk"
+copyDeskKey.onclick = ()->
+  try
+    await navigator.clipboard.writeText deskUrl()
+    copyDeskKey.textContent = "Copied"
+    setTimeout (()-> copyDeskKey.textContent = "Copy the desk's link"), 1500
+  catch
+    prompt "Your desk's link:", deskUrl()
 
 # SAVE & PRINT ####################################################################################
 
@@ -2741,9 +2889,21 @@ settings = Object.assign structuredClone(defaults), load "settings", {}
 normalize()
 loadAtlases()
 
-if m = location.pathname.match /^\/s\/([a-z0-9]{6,32})\/?$/
-  # A page's link: read it — or, if it's yours and has changes the server hasn't got yet, pick up where you left off
+# Put the pages made here before there were desks onto this one, and see what's on it
+startDesk = ()->
+  deskHash = await sha256 deskKey
+  await claimPages()
+  await refreshDesk()
+
+hash = location.hash
+if m = hash.match /^#desk=([A-Za-z0-9]{20,64})$/
+  # A desk's link: take it up here
+  takeUpDesk m[1]
+else if m = location.pathname.match /^\/s\/([a-z0-9]{6,32})\/?$/
+  # A page's link: read it — or, if it's yours and has changes the server hasn't got yet, pick up where you left off.
+  # Opened from the desk (#edit), or to show the desk (#pages), your own page comes up ready to type on.
   id = m[1]
+  history.replaceState null, "", location.pathname if hash
   cached = cachedPage id if owns id
   if cached?.pending
     loadPage id, cached
@@ -2754,20 +2914,28 @@ if m = location.pathname.match /^\/s\/([a-z0-9]{6,32})\/?$/
   else
     pageMissing = true
     loadPage id, {markdown: "->There's no page here.<-"}
-  setMode false
+  setMode hash in ["#edit", "#pages"] and owns id
   publish()
+  startDesk()
+  openDesk() if hash is "#pages"
 else
-  # The site itself: back to the page you were last working on, or a fresh one. The first picks up whatever was on
-  # the machine before pages had links (and the link it was shared at, if it was).
+  # The site itself: back to the page you were last working on here — or, in a browser that's just taken up a desk,
+  # the one typed on most recently — or a fresh one. The first picks up whatever was on the machine before pages had
+  # links (and the link it was shared at, if it was).
   id = load "current", null
   id = load "sharing", null unless owns id
-  page = cachedPage id if owns id
-  unless page?
-    id = makePage() unless owns id
-    page = {markdown: legacyText(), settings, pending: true}
-    try localStorage.removeItem key for key in ["text", "format", "styles", "stylesVersion", "sharing"]
-  history.replaceState null, "", "/s/#{id}"
-  loadPage id, page
-  cachePage page.pending ? false
-  setMode true
-  publish()
+  if not owns(id) and deskPages.length
+    location.replace "/s/#{deskPages[0].id}#{if hash is "#pages" then "#pages" else "#edit"}"
+  else
+    page = cachedPage id if owns id
+    unless page?
+      id = makePage() unless owns id
+      page = {markdown: legacyText(), settings, pending: true}
+      try localStorage.removeItem key for key in ["text", "format", "styles", "stylesVersion", "sharing"]
+    history.replaceState null, "", "/s/#{id}"
+    loadPage id, page
+    cachePage page.pending ? false
+    setMode true
+    publish()
+    startDesk()
+    openDesk() if hash is "#pages"

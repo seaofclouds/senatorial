@@ -75,14 +75,20 @@ column. Columns spread out across the line when they fit, and wrap within a shar
 ## Every page has a link
 
 Each page lives at its own link, `/s/…`, and is saved there as you type — so whatever's on the page is always ready to
-share. Visiting the site takes you to the page you were last working on, and New feeds in a fresh one at a new link
-(Back returns to the one before). To share a page, share its link — it's the one in the address bar.
+share. Visiting the site takes you to the page you were last working on, and New page (under the Pages key) feeds
+in a fresh one at a new link (Back returns to the one before). To share a page, share its link — it's the one in the
+address bar.
 
-Opening a link shows just the page, in the middle of the screen, with an Edit key in the corner. On a page you made,
-Edit brings up the machine, and Save (in the same spot) puts it away again. Anyone else sees the latest version (an open link picks up
-changes when they come back to it), and their Edit key makes them a copy of their own, at its own link.
+Opening a link shows just the page, in the middle of the screen, with an Edit key in the corner. On one of your own
+pages, Edit brings up the machine, and Save (in the same spot) puts it away again. Anyone else sees the latest version
+(an open link picks up changes when they come back to it), and their Edit key makes them a copy of their own, at its
+own link.
 
-Only the browser a page was made in can change it: it keeps the page's key, and the server keeps just a hash of it.
+Your pages are on your desk. The Pages key lays them all out, the latest first, at true relative size; pick one to
+type on, or × to throw it away. The desk is a key your browser keeps (the server knows only its hash). To have your
+pages on another device, press Copy the desk's link there and open it on that device: it takes up the same desk, so
+every page on it can be found and edited from either. Anyone with the desk's link can edit your pages, so keep it to
+yourself.
 
 ## Glyphs
 

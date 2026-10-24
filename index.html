@@ -486,7 +486,7 @@
   }
 
   /* Paper chooser — every kind of sheet laid out on the desk */
-  .chooser {
+  .chooser, .desk {
     position: fixed;
     inset: 0;
     z-index: 2;
@@ -557,6 +557,27 @@
     }
 
     .glyph { display: block; background-repeat: no-repeat; }
+  }
+
+  /* Your pages, laid out on the desk the same way, each with its first line typed at the top */
+  .desk {
+    .sheet.typed {
+      align-items: flex-start;
+      .name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(30, 5%, 30%); }
+      .forget { left: auto; right: .4em; top: auto; bottom: .3em; }
+    }
+
+    .elsewhere {
+      max-width: 34em;
+      margin: 0 auto;
+      font-size: .85rem;
+      line-height: 1.6;
+      text-align: center;
+      color: hsl(30, 5%, 50%);
+
+      button { margin: 0 .3em; font-size: .85rem; color: hsl(30, 5%, 35%); background: hsl(36, 10%, 82%); }
+      span { display: block; color: hsl(30, 5%, 62%); }
+    }
   }
 
   .sheet {
@@ -683,7 +704,7 @@
       <button id="paper" title="Paper">Letter</button>
       <button id="characters" title="Every character the machine strikes, to type one">ñ ½ →</button>
       <span class="saved"></span>
-      <button id="new" title="Feed in a fresh page, at a new link">New</button>
+      <button id="pages" title="Every page on your desk, and a fresh one">Pages</button>
       <button id="import" title="Open a Markdown or text file in place of this page">Import Markdown</button>
       <input type="file" id="importFile" accept=".md,.markdown,.txt,text/markdown,text/x-markdown,text/plain" hidden>
       <button id="download" title="Each page as a 600 dpi picture">Export PNG</button>
@@ -708,6 +729,15 @@
 </div>
 
 <canvas class="loupe" hidden></canvas>
+
+<div class="desk" hidden>
+  <div class="sheets"></div>
+  <p class="elsewhere">
+    These are the pages on this browser's desk. To have them on another device too, open the desk's link there.
+    <button class="copy-desk">Copy the desk's link</button>
+    <span>Anyone with it can edit your pages, so keep it to yourself.</span>
+  </p>
+</div>
 
 <div class="print"></div>
 
