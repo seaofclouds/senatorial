@@ -2693,7 +2693,8 @@ closeDesk = ()->
   document.body.classList.remove "choosing"
   input.focus preventScroll: true unless viewing
 
-paperSize = (s)->
+# The size of the sheet a page is typed on, the way it's fed in
+sheetSize = (s)->
   s = Object.assign {}, defaults, s
   [w, h] = if s.paper is "custom" or not papers[s.paper]? then [s.customW, s.customH] else [papers[s.paper].w, papers[s.paper].h]
   if s.landscape then [h, w] else [w, h]
@@ -2709,7 +2710,7 @@ renderDesk = ()->
   sheets = desk.querySelector ".sheets"
   sheets.innerHTML = ""
   addSheet = (s, name, detail, active, choose)->
-    [w, h] = paperSize s
+    [w, h] = sheetSize s
     sheet = document.createElement "div"
     sheet.className = "sheet typed"
     sheet.classList.add "active" if active
