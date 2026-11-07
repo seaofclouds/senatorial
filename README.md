@@ -127,6 +127,23 @@ Pages are saved to their links by `worker.js`, so to run it all locally, `pnpm i
 `.wrangler/`, which `.assetsignore` keeps out of the folder being served.
 Any static server works for just typing, e.g. `pnpm dlx http-server .`, though nothing is saved to a link that way.
 
+## Where it develops
+
+This folder is where senatorial develops. The shared repository
+[seaofclouds/senatorial](https://github.com/seaofclouds/senatorial) keeps a
+branch named `patchwork-things` that mirrors this folder commit for commit, so
+anyone working on that repository's `main` can read, merge or cherry-pick from
+it as an ordinary branch. From the collection root:
+
+```sh
+node scripts/senatorial-sync.mjs push   # commits here touching senatorial/ -> that branch
+node scripts/senatorial-sync.mjs pull   # new commits on the shared main -> here
+```
+
+Both carry plain git patches and skip anything already on the other side. The
+script expects a clone of the shared repository at `~/Developer/GitHub/senatorial`
+(or `$SENATORIAL_REPO`). `--dry-run` shows what would move.
+
 ## Deploying
 
 Pushes to `main` deploy to the `senatorial` Cloudflare Worker via Workers Builds (with this folder as the build's
