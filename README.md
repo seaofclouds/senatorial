@@ -146,7 +146,8 @@ script expects a clone of the shared repository at `~/Developer/GitHub/senatoria
 
 ## Deploying
 
-Pushes to `main` deploy to the `senatorial` Cloudflare Worker via Workers Builds (with this folder as the build's
-root directory), using `wrangler.jsonc` to serve this folder as static assets, with `worker.js` handling pages' links
-(`/s/…`) and their API (`/api/shares/…`). `pnpm run deploy` deploys it by hand.
+Pushes to patchwork-things' `main` that touch this folder deploy to the `senatorial` Cloudflare Worker via Workers
+Builds, which is connected to that repository with `senatorial` as the root directory and `senatorial/*` as its watch
+path. `wrangler.jsonc` serves this folder as static assets, with `worker.js` handling pages' links (`/s/…`) and their
+API (`/api/shares/…`). `pnpm run deploy` deploys it by hand. The shared repository's `main` no longer deploys.
 Pages are kept in the `senatorial-shares` D1 database; its table is in `migrations/`.
