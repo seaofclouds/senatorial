@@ -127,27 +127,32 @@ Pages are saved to their links by `worker.js`, so to run it all locally, `pnpm i
 `.wrangler/`, which `.assetsignore` keeps out of the folder being served.
 Any static server works for just typing, e.g. `pnpm dlx http-server .`, though nothing is saved to a link that way.
 
-## Where it develops
+## Developing and deploying
 
-This folder is where senatorial develops. The shared repository
-[seaofclouds/senatorial](https://github.com/seaofclouds/senatorial) keeps a
-branch named `patchwork-things` that mirrors this folder commit for commit, so
-anyone working on that repository's `main` can read, merge or cherry-pick from
-it as an ordinary branch. From the collection root:
+This folder is where senatorial develops: commit here.
+
+**Deploying.** Pushes to patchwork-things' `main` that touch this folder deploy the `senatorial` Cloudflare Worker
+through Workers Builds, which is connected to this repository with `senatorial` as its path, `senatorial/*` as its
+watch path, no build command, and `npx wrangler deploy` as its deploy command. The build installs with pnpm from
+this folder's lockfile. `wrangler.jsonc` serves the folder as static assets, with `worker.js` behind pages' links
+(`/s/…`) and their API (`/api/shares/…`); `.assetsignore` keeps the tooling files, `.wrangler/` and `scans/` out of
+the upload. By hand it is `pnpm run deploy` (not `pnpm deploy`, which pnpm 10 takes for its own command). For a look
+before touching production, `pnpm wrangler versions upload` publishes a preview and prints its URL.
+
+Pages are kept in the `senatorial-shares` D1 database. A schema change is a new file in `migrations/`, applied with
+`pnpm wrangler d1 migrations apply senatorial-shares` (add `--local` for the dev database) before the code that
+needs it is deployed; deploying does not run migrations.
+
+**The shared repository.** [seaofclouds/senatorial](https://github.com/seaofclouds/senatorial) is shared, and its
+`main` is maintained there; it no longer deploys anything. That repository keeps a branch named `patchwork-things`
+that mirrors this folder commit for commit, so anyone working on its `main` can read, merge or cherry-pick from it
+as an ordinary branch, and commits made on `main` come back here the same way. From the collection root:
 
 ```sh
-node scripts/senatorial-sync.mjs push   # commits here touching senatorial/ -> that branch
-node scripts/senatorial-sync.mjs pull   # new commits on the shared main -> here
+node scripts/senatorial-sync.mjs push   # commits here touching senatorial/ -> that branch, then push it
+node scripts/senatorial-sync.mjs pull   # new commits on the shared main -> commits here
 ```
 
-Both carry plain git patches and skip anything already on the other side. The
-script expects a clone of the shared repository at `~/Developer/GitHub/senatorial`
-(or `$SENATORIAL_REPO`). `--dry-run` shows what would move.
-
-## Deploying
-
-Pushes to patchwork-things' `main` that touch this folder deploy to the `senatorial` Cloudflare Worker via Workers
-Builds, which is connected to that repository with `senatorial` as the root directory and `senatorial/*` as its watch
-path. `wrangler.jsonc` serves this folder as static assets, with `worker.js` handling pages' links (`/s/…`) and their
-API (`/api/shares/…`). `pnpm run deploy` deploys it by hand. The shared repository's `main` no longer deploys.
-Pages are kept in the `senatorial-shares` D1 database; its table is in `migrations/`.
+Both carry plain git patches, keep authorship and messages, and skip anything already on the other side. The
+script expects a clone of the shared repository at `~/Developer/GitHub/senatorial` (or `$SENATORIAL_REPO`);
+`--dry-run` shows what would move.
