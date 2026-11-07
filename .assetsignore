@@ -7,3 +7,10 @@ wrangler.jsonc
 worker.js
 migrations
 scans
+.gitignore
+.dev.vars
+.dev.vars.*
+package.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+vitest.config.ts

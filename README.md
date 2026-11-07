@@ -119,13 +119,14 @@ that takes it.
 ## Running it
 
 There's no build step — `index.coffee` is compiled in the browser by `coffeescript.js`.
-Pages are saved to their links by `worker.js`, so to run it all locally,
-`npx wrangler d1 migrations apply senatorial-shares --local --persist-to ../.senatorial-state` and then
-`npx wrangler dev --persist-to ../.senatorial-state` (keeping the local database outside the folder being served).
-Any static server works for just typing, e.g. `npx http-server .`, though nothing is saved to a link that way.
+Pages are saved to their links by `worker.js`, so to run it all locally, `pnpm install` (which brings in wrangler),
+`pnpm wrangler d1 migrations apply senatorial-shares --local` and then `pnpm dev`. The local database lives in
+`.wrangler/`, which `.assetsignore` keeps out of the folder being served.
+Any static server works for just typing, e.g. `pnpm dlx http-server .`, though nothing is saved to a link that way.
 
 ## Deploying
 
-Pushes to `main` deploy to the `senatorial` Cloudflare Worker via Workers Builds, using `wrangler.jsonc` to serve
-this folder as static assets, with `worker.js` handling pages' links (`/s/…`) and their API (`/api/shares/…`).
+Pushes to `main` deploy to the `senatorial` Cloudflare Worker via Workers Builds (with this folder as the build's
+root directory), using `wrangler.jsonc` to serve this folder as static assets, with `worker.js` handling pages' links
+(`/s/…`) and their API (`/api/shares/…`). `pnpm run deploy` deploys it by hand.
 Pages are kept in the `senatorial-shares` D1 database; its table is in `migrations/`.

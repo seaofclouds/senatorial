@@ -1,0 +1,18 @@
+{
+  "name": "senatorial",
+  "private": true,
+  "type": "module",
+  "description": "A typewriter in the browser. No build step: index.coffee is compiled by coffeescript.js in the page, and wrangler bundles worker.js on deploy.",
+  "scripts": {
+    "build": "echo 'no build step: index.coffee is compiled in the browser; wrangler bundles worker.js on deploy'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "happy-dom": "^15.11.7",
+    "vitest": "^3.2.4",
+    "wrangler": "4.157.0"
+  }
+}

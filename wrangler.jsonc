@@ -17,7 +17,7 @@
       "migrations_dir": "migrations"
     }
   ],
-  // Previews of other branches (npx wrangler preview) save shared pages to the same database as production
+  // Previews of other branches (pnpm wrangler preview) save shared pages to the same database as production
   "previews": {
     "d1_databases": [
       {
